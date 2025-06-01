@@ -58,7 +58,7 @@
 
 <img width="780" alt="Image" src="https://github.com/user-attachments/assets/305ff8a1-5bd3-4647-8253-48136d146dd4" />
 
-- `kubectl exec etcd-master -n kube-system etcdctl get / --prefix -keys-only
+- `kubectl exec etcd-master -n kube-system etcdctl get / --prefix -keys-only`
 
 <img width="790" alt="Image" src="https://github.com/user-attachments/assets/33ecff2a-43fe-4e80-8a70-5b753374d89b" />
 
