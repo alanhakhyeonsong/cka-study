@@ -1,3 +1,4 @@
+## Core Concept
 ## Cluster Architecture
 ![Image](https://github.com/user-attachments/assets/16a69c26-cfee-42d0-ba03-a13b5447f72d)
 
@@ -83,3 +84,29 @@
 5. 상태 업데이트
 - kubelet이 파드 상태를 API Server에 보고
 - API Server가 ETCD에 최신 상태 저장
+
+## Kube Controller Manager
+- Node Controller: 노드의 상태를 모니터링하고 관리
+- Replication Controller: 지정된 수의 파드 Replication 관리
+- Endpoints Controller: 서비스와 파드를 연결
+- Service Account & Token Controllers: 새로운 네임스페이스에 대한 기본 계정과 API 접근 토큰을 생성
+
+### Node Monitor Period, Node Monitor Grace Period
+- Node Monitor Period: 노드 컨트롤러가 노드의 상태를 확인하는 주기 (기본값: 5초)
+- Node Monitor Grace Period: 노드를 'Unreachable' 상태로 표시하기 전까지 기다리는 시간 (기본값: 40초)
+
+### Pod Eviction Timeout
+- 노드가 'Unreachable' 상태가 된 후, 해당 노드의 파드들을 제거하기까지 기다리는 시간 (기본값: 5분)
+- 이 시간이 지나면 노드의 파드들이 강제로 종료되고 다른 정상 노드로 재스케줄링됨
+- (Kubeadm) Controller Manager 는 마스터 노드의 kube-system 네임스페이스에 POD로 위치
+- POD 정의 파일에서 옵션을 볼 수 있음 `/etc/kubernetes/manifests/kube-controller-manager.yml`
+  - Non-Kubeadm : `/etc/systemd/system/kube-controller-manager.service`
+
+### Kubeadm
+- 자동화된 클러스터 설정 도구
+- 쿠버네티스 컴포넌트들이 Pod로 실행됨
+- 설정 파일: `/etc/kubernetes/manifests/` 디렉토리에 위치
+- 컴포넌트 관리가 쿠버네티스 자체적으로 이루어짐
+- 업그레이드와 관리가 상대적으로 쉬움
+
+## Kube Scheduler
