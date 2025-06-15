@@ -263,3 +263,47 @@ helm install myblog ./wordpress
 - 빠르게 설정할 때는 `--set`
 - 여러 값 변경 시는 `custom-values.yaml`
 - 완전한 제어가 필요하면 차트를 풀고 `values.yaml` 직접 수정
+
+## Lifecycle management with Helm
+### 릴리스(Release)란 무엇인가?
+- Helm 차트를 설치하면 "릴리스"가 생성됨.
+- 릴리스는 단순한 앱이 아니라 Kubernetes 오브젝트들의 집합.
+- Helm은 릴리스에 포함된 오브젝트들을 추적하므로 업그레이드, 제거, 롤백 등의 작업을 다른 릴리스에 영향 없이 수행 가능함.
+
+### Helm 업그레이드
+- 업그레이드 시나리오
+  - eg. Nginx 차트의 오래된 버전(예: v1.19.2)을 설치하고, 보안 이슈로 최신 버전(v1.21.4)으로 업그레이드.
+- 실행 절차
+  - 설치 당시 버전 지정 가능: `helm install nginx-release bitnami/nginx --version 1.19.2`
+  - 현재 Pod 상태 확인: `kubectl get pods, kubectl describe pod`
+  - 업그레이드 명령 실행: `helm upgrade nginx-release bitnami/nginx`
+  - 리비전 변경 확인: 업그레이드하면 revision이 1 → 2로 변경됨.
+  - Helm이 관련 리소스를 자동 교체함 (예: Pod 새로 생성)
+
+### 릴리스 이력 추적
+- Helm 히스토리 명령
+- helm history nginx-release 명령으로 리비전별 히스토리 확인 가능
+  - 어떤 차트/앱 버전이 사용되었는지
+  - 작업 유형: install, upgrade, rollback
+- 대규모 팀에서 변경 이력 추적에 유용함
+
+### 롤백(Rollback) 기능
+- 잘못된 업그레이드 되돌리기
+  - `helm rollback nginx-release 1` 실행
+  - 이전 리비전(1)으로 "구성만 동일한" 새 리비전(3)을 생성함.
+  - helm history에서 롤백 기록 확인 가능
+
+### 업그레이드/롤백 시 주의사항
+- 외부 자원은 포함되지 않음
+  - Helm은 Kubernetes 선언/매니페스트만 백업/복원함
+  - 외부 데이터(예: DB, PV)는 포함되지 않음
+    - eg. MySQL 롤백 시 Pod는 되돌아가지만, 데이터는 유지됨
+    - 따라서 데이터는 별도로 백업 필요
+- 해결 방안 : Helm의 Chart Hooks를 활용하여 업그레이드 전후에 데이터 백업 또는 마이그레이션 자동화 가능
+
+### 정리
+Helm은 다음과 같은 방식으로 Kubernetes 앱의 수명 주기를 관리함
+- 릴리스 기반 상태 추적
+- 버전별 업그레이드/다운그레이드
+- 히스토리 및 롤백 기능 제공
+- 데이터 보존은 별도로 관리 필요
