@@ -213,3 +213,53 @@ Helm 차트는 특정 구조와 파일로 구성된 디렉토리다. 주요 구�
 - WordPress는 프론트엔드 앱, MariaDB는 백엔드 DB로 구성된 2계층 애플리케이션
 - MariaDB는 독립 차트로 되어 있고, 종속성으로 연결만 하면 Helm이 알아서 설치
 - 두 차트를 병합할 필요 없음
+
+## Customizing chart parameters
+- Helm 차트로 WordPress를 설치할 때는 기본적으로 values.yaml 파일의 값들이 사용됨.
+  - eg. 기본 블로그 이름은 "User blog"으로 설정됨.
+- 기본 설정이 마음에 들지 않을 수 있음. 예: 블로그 이름, 사용자 이메일 등.
+
+### --set 명령줄 옵션 사용
+- `helm install` 명령에 `--set` 옵션을 추가하여 `values.yaml`의 특정 값을 덮어쓸 수 있음.
+
+```bash
+helm install myblog bitnami/wordpress \
+  --set blog.name="Helm Tutorial" \
+  --set user.email="john@example.com"
+```
+- 다수의 설정을 동시에 적용 가능.
+
+### 사용자 지정 values 파일 작성
+- 값이 많아지면 `--set`보다 별도의 `custom-values.yaml` 파일을 만들어 관리하는 것이 편리함.
+- `=` 대신 `:` 문법 사용.
+
+```yaml
+blog:
+  name: Helm Tutorial
+user:
+  email: john@example.com
+```
+
+설치 시 다음과 같이 적용:
+
+```bash
+helm install myblog bitnami/wordpress -f custom-values.yaml
+```
+
+### 차트 로컬로 풀어서 직접 수정
+- Helm 저장소에서 차트를 helm pull로 다운로드 후 압축 해제:
+
+```bash
+helm pull bitnami/wordpress --untar
+```
+
+- `wordpress/values.yaml` 직접 수정.
+- 설치 시 로컬 디렉토리 경로 지정:
+```bash
+helm install myblog ./wordpress
+```
+
+정리
+- 빠르게 설정할 때는 `--set`
+- 여러 값 변경 시는 `custom-values.yaml`
+- 완전한 제어가 필요하면 차트를 풀고 `values.yaml` 직접 수정
