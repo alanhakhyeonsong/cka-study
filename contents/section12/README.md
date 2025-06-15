@@ -24,6 +24,7 @@
 Helm은 Kubernetes 앱을 더 이상 오브젝트 모음이 아니라, 하나의 애플리케이션으로 관리할 수 있게 해주는 도구다. YAML 파일의 복잡성과 수작업의 부담을 줄여주며, 패키지 설치기처럼 앱의 생애 주기 전체를 효율적으로 관리할 수 있게 돕는다.
 
 ```bash
+# helm install [release-name][chart-name]
 $ helm install wordpress
 $ helm upgrade wordpress
 $ helm rollback wordpress
@@ -103,3 +104,112 @@ $ helm uninstall wordpress
 - 리비전: 릴리스의 상태 변경 이력 (스냅샷처럼 작동)
 - `values.yaml`: 사용자 설정의 중심
 - Artifact Hub 등에서 차트를 손쉽게 검색하고 설치 가능
+
+## Helm Charts
+
+```yaml
+# Service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: hello-world
+
+---
+# Deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+spec:
+  replica: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      containers:
+        - name: hello-world
+          image: {{ .Value.image.repository }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+
+---
+# values.yaml
+replicaCount: 1
+
+image:
+  repository: nginx
+
+---
+# Chart.yaml
+apiVersion: v2
+appVersion: "1.16.0"
+name: hello-world
+description: A web application
+
+type: application
+```
+
+### 차트(Chart)의 구성 요소
+```
+mychart/
+  Chart.yaml
+  values.yaml
+  charts/
+  templates/
+  ...
+```
+Helm 차트는 특정 구조와 파일로 구성된 디렉토리다. 주요 구성 요소는 다음과 같다.
+
+1. Chart.yaml (메타데이터 파일)
+- API Version: v1 또는 v2 (Helm 3용 차트는 v2 사용)
+- name: 차트 이름
+- version: 차트 자체의 버전 (앱 버전과 다름)
+- appVersion: 배포할 애플리케이션의 버전 (예: WordPress 5.8)
+- description: 차트 설명
+- type: application(기본) 또는 library
+- dependencies: 다른 차트(예: MariaDB 등) 의존성 정의
+- keywords, maintainers, home, icon 등 검색과 문서화를 위한 필드 포함
+
+2. values.yaml (설정값 파일)
+- 사용자가 설정 가능한 값들을 정의
+- 템플릿에서 이 값을 참조하여 실제 YAML 파일이 생성됨
+- 가장 자주 수정되는 파일 (예: 이미지 이름, 복제본 수 등)
+
+3. templates/ 디렉터리
+- 실제 Kubernetes 리소스(Deployment, Service 등)를 생성하는 템플릿 YAML 파일들
+- Go 템플릿 문법을 사용하여 `values.yaml`의 값과 결합됨
+
+4. 기타 파일
+- `README.md`: 차트 설명
+- `LICENSE`: 라이선스
+- `charts/`: 종속 차트들
+- `Chart.lock`: 종속성 잠금 파일
+
+### 차트의 작동 방식
+- Helm은 차트를 기반으로 최종 결과를 생성하고, 해당 템플릿과 값을 조합해 실제 Kubernetes 매니페스트를 만들어 클러스터에 적용.
+- 사용자는 목적만 명시하면 Helm이 나머지 실행 경로를 자동으로 계산.
+
+### Helm 3의 특징 (vs Helm 2)
+- `Chart.yaml`에 API Version 필드(v2) 추가됨 (차트의 버전을 명확하게 구분)
+- dependencies 필드와 type 필드는 Helm 3에서 새로 도입된 기능
+- Helm 2로 작성된 차트는 apiVersion: v1, Helm 3용 차트는 apiVersion: v2 권장
+
+### 예시: WordPress + MariaDB 차트
+- WordPress는 프론트엔드 앱, MariaDB는 백엔드 DB로 구성된 2계층 애플리케이션
+- MariaDB는 독립 차트로 되어 있고, 종속성으로 연결만 하면 Helm이 알아서 설치
+- 두 차트를 병합할 필요 없음
