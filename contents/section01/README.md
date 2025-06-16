@@ -186,3 +186,96 @@ kubelet 구성 및 인증서 생성, TLS 부트스트랩 과정.
   - 각 Node에 하나의 kube-proxy Pod가 항상 존재하도록 보장함.
 
 DaemonSet 개념은 이후에 나옴.
+
+## Pods with YAML
+- 쿠버네티스는 YAML 파일을 통해 객체를 정의.
+  - Pod, ReplicaSet, Deployment, Service 등 다양한 리소스를 생성 가능
+- 모든 쿠버네티스 YAML 파일은 다음 4가지 최상위 필드를 포함해야 한다.
+  - apiVersion: 사용할 쿠버네티스 API의 버전 (ex. v1, apps/v1beta1)
+  - kind: 생성하려는 객체 유형 (ex. Pod, Service, Deployment)
+  - metadata: 객체의 이름 및 레이블 등 부가 정보
+  - spec: 객체의 상세 구성 정보
+
+```yaml
+# pod-definition.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-app-pod
+  labels:
+    app: my-app
+spec:
+  containers:
+    - name: nginx-container
+      image: nginx
+
+```
+
+|Kind|Version|
+|--|--|
+|Pod|v1|
+|Service||
+|ReplicaSet|apps/v1|
+|Deployment|apps/v1|
+
+### metadata와 label 구성
+- metadata는 객체 식별 정보를 담는다.
+  - `name` : 리소스 이름
+  - `labels` : 객체에 부여할 키-값 쌍의 레이블 목록
+    - eg. `{ app: my-app }`
+    - Pod를 그룹핑하거나 검색하는 데 유용 (ex. frontend, backend, db 등)
+- 중첩 구조와 들여쓰기 중요
+  - metadata 하위에 name, labels 등이 형제 관계로 잘 들여쓰기되어야 함.
+
+### spec과 컨테이너 정의
+- `spec`은 객체의 핵심 동작 정의를 포함.
+  - Pod인 경우, 컨테이너 목록(containers)이 포함됨
+  - `containers`는 배열이며, 각 컨테이너는 다음 정보를 가짐
+    - `name`: 컨테이너 이름
+    - `image`: 사용할 Docker 이미지 (예: nginx)
+
+### 생성 및 확인 명령어
+- Pod 생성
+
+```bash
+kubectl create -f pod-definition.yaml
+```
+
+- Pod 목록 확인
+
+```bash
+kubectl get pods
+```
+
+- Pod 상세 정보 확인
+
+```bash
+kubectl describe pod my-app-pod
+```
+
+→ 생성 시각, 적용된 라벨, 컨테이너 이미지, 이벤트 기록 등 확인 가능
+
+### 자주 써먹을 명령어
+```bash
+# 해당하는 네임스페이스 내 모든 파드의 상세 목록 조회
+kubectl get po -o wide
+
+# 상세 출력
+kubectl describe po my-pod
+
+# nginx 파드에 대한 spec을 생성하고, pod.yaml이라는 파일에 해당 내용을 기록
+kubectl run image --image=nginx --dry-run=client -o yaml > pod.yaml
+kubectl apply -f pod.yaml
+
+# 네임스페이스 내에서 Redis라는 이름으로 실행중인 Pod 조회
+kubectl get po --field-selector=metadata.name=Redis
+
+# 'foo'라는 레플리카셋을 3으로 스케일
+kubectl scale --replicas=3 rs/foo
+
+# name=myLabel 라벨을 가진 파드와 서비스 삭제
+kubectl delete pods,services -l name=myLabel
+
+# 특정 리비전으로 롤백
+kubectl rollout undo deployment/frontend --to-revision=2
+```
