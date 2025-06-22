@@ -315,3 +315,72 @@ kubectl rollout undo deployment/frontend --to-revision=2
 - 복제 컨트롤러와 복제본 세트 모두 Pod를 복제해 고가용성을 보장
 - 복제본 세트는 선택기 기능을 통해 더 유연하고 권장됨
 - 템플릿은 향후 Pod 복구를 위한 정의로 항상 필요
+
+## Deployment
+- 기존에는 Pod 또는 ReplicaSet을 직접 사용해 애플리케이션을 배포했음.
+- 하지만 제품 환경에선 더 정교한 기능이 필요함
+  - 다수의 웹 서버 인스턴스 실행
+  - 롤링 업데이트 (하나씩 점진적 업그레이드)
+  - 롤백 기능 (업데이트 실패 시 이전 상태로 되돌리기)
+  - 일시 정지 및 재개 (변경을 한꺼번에 적용하기 위함)
+
+### Deployment란?
+- 쿠버네티스의 고수준 Object
+- ReplicaSet을 관리하고 자동으로 생성함
+- 배포 시 자동으로 Pod를 생성함
+- 주요 기능
+  - 롤링 업데이트
+  - 롤백
+  - 일시 정지 및 재개
+
+### Deployment 생성 방법
+- 배포 정의 파일 작성 (YAML)
+- 구성 요소
+  - `apiVersion`: `apps/v1`
+  - `kind`: `Deployment`
+  - `metadata`: 이름, 레이블
+  - `spec`: `replicas`, `selector`, `template`
+- 배포 실행
+  - `kubectl create -f [파일명].yaml`
+  - `kubectl get deployments`로 생성 확인
+- 자동 생성 확인
+  - 배포 시 자동 생성된 ReplicaSet 확인
+    - `kubectl get rs`
+  - Pod 확인
+    - `kubectl get pods`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+```
+
+### Deployment, ReplicaSet, Pod 관계
+Deployment → ReplicaSet → Pod
+
+- Deployment는 전체 배포 전략을 관리하고,
+- ReplicaSet은 실제 Pod의 복제 수를 관리함.
+
+### 정리
+- Deployment는 실무 배포를 위한 핵심 Object
+- 롤링 업데이트와 롤백, 일시 정지 같은 실전 기능 제공
+- 직접 ReplicaSet을 관리하지 않아도 됨
+- `kubectl get all`로 생성된 모든 리소스 확인 가능
