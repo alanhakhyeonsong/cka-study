@@ -386,3 +386,95 @@ Deployment → ReplicaSet → Pod
 - 롤링 업데이트와 롤백, 일시 정지 같은 실전 기능 제공
 - 직접 ReplicaSet을 관리하지 않아도 됨
 - `kubectl get all`로 생성된 모든 리소스 확인 가능
+
+## Services
+### 서비스란 무엇인가?
+- Pod 간 통신과 외부 접근을 가능하게 하는 쿠버네티스 객체
+- 애플리케이션 내부 구성 요소(프론트엔드, 백엔드, 데이터 소스) 간의 연결 제공
+- 외부 사용자와 내부 시스템 간의 안정적인 연결을 유지
+
+### 서비스의 주요 목적
+- 내부 Pod들 간 통신 지원
+- 외부 요청을 포드로 라우팅
+- Pod의 수명주기(삭제/추가)에 따라 자동 갱신
+- 내장 로드 밸런싱 기능 제공 (무작위 분산 방식)
+
+### 서비스 유형
+| 유형               | 설명                                 |
+| ---------------- | ---------------------------------- |
+| **ClusterIP**    | 클러스터 내부 통신 전용 (기본값)                |
+| **NodePort**     | 외부에서 클러스터 노드의 IP + 지정 포트를 통해 접근 가능 |
+| **LoadBalancer** | 클라우드 제공자가 지원하는 경우 외부 로드 밸런서 자동 생성  |
+
+### NodePort 서비스 예제 흐름
+- Pod 내부 웹 서버: TargetPort = 80
+- 서비스 객체 내부 포트: Port = 80
+- 노드 외부에 노출된 포트: NodePort = 30008 (기본 범위: 30000~32767)
+
+→ 외부 사용자는 `http://노드IP:30008`로 접근
+
+### 서비스 정의 파일 (YAML)
+- `apiVersion`: v1
+- `kind`: Service
+- `metadata`: 서비스 이름 등
+- `spec`
+  - `type`: NodePort / ClusterIP / LoadBalancer
+  - `ports`: port, targetPort, nodePort
+  - `selector`: Pod 라벨과 일치시켜 연결
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector:
+    app.kubernetes.io/name: MyApp
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 9376
+```
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    app.kubernetes.io/name: proxy
+spec:
+  containers:
+  - name: nginx
+    image: nginx:stable
+    ports:
+      - containerPort: 80
+        name: http-web-svc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app.kubernetes.io/name: proxy
+  ports:
+  - name: name-of-service-port
+    protocol: TCP
+    port: 80
+    targetPort: http-web-svc
+```
+
+### 라벨과 선택기
+- 서비스는 selector로 라벨이 일치하는 Pod를 자동으로 찾아 연결
+- Pod가 여러 개인 경우에도 동일 라벨을 기반으로 자동 라우팅
+
+### 여러 노드에서 포드가 실행 중인 경우
+- NodePort는 모든 노드의 동일 포트에 자동 설정됨
+- 어떤 노드의 IP로 접근해도 요청이 적절한 Pod로 전달됨
+
+### 정리
+- 쿠버네티스 서비스는 Pod 간, 사용자와 애플리케이션 간 통신을 연결
+- NodePort는 외부 접근을 가능하게 하며, 포트 매핑을 통해 요청 전달
+- 서비스는 Pod 수나 위치 변화에도 유연하게 대응하며, 추가 구성 없이 자동 업데이트됨
