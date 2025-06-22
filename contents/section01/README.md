@@ -478,3 +478,59 @@ spec:
 - 쿠버네티스 서비스는 Pod 간, 사용자와 애플리케이션 간 통신을 연결
 - NodePort는 외부 접근을 가능하게 하며, 포트 매핑을 통해 요청 전달
 - 서비스는 Pod 수나 위치 변화에도 유연하게 대응하며, 추가 구성 없이 자동 업데이트됨
+
+## Service - Cluster IP
+- 풀 스택 앱 구조
+  - 다양한 역할의 Pod 존재: 프론트엔드, 백엔드, Redis, MySQL 등
+  - 각 계층은 서로 통신해야 함 (예: 프론트엔드 → 백엔드, 백엔드 → Redis)
+- 문제점
+  - Pod는 IP를 갖지만 동적이므로, 직접 IP로 통신하면 안정성이 떨어짐
+- 해결책: Kubernetes 서비스
+  - 여러 Pod를 하나의 서비스로 묶고, 서비스 이름을 통해 접속
+  - 내부적으로 라운드로빈 방식으로 Pod에 트래픽 분산
+- 클러스터 IP 서비스
+  - Kubernetes의 기본 서비스 유형
+  - Pod 간 내부 통신에 사용
+  - 서비스 정의 파일을 통해 생성 (API version, kind, metadata, spec 등 포함)
+  - `selector`를 사용해 어떤 Pod들과 연결할지 지정
+  - `port`와 `targetPort` 설정을 통해 외부 요청을 Pod의 특정 포트로 전달
+- 명령어 사용
+  - `kubectl create -f [서비스 정의 파일]`로 생성
+  - `kubectl get services`로 서비스 상태 확인
+- 장점
+  - 각 계층은 자유롭게 확장/이동 가능
+  - IP 변경과 무관하게 안정적인 통신 가능
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: back-end
+spec:
+  type: ClusterIP
+  ports:
+    - targetPort: 80
+      port: 80
+  selector:
+    app: myapp
+    type: back-end
+```
+
+## Service - LoadBalancer
+### NodePort 서비스와 LoadBalancer 유형 비교
+- NodePort 서비스란?
+  - 클러스터의 작업자 노드 포트를 외부에 노출하여 접근 가능하게 함.
+  - 클러스터의 모든 노드 IP + 노출된 포트로 애플리케이션에 접근 가능.
+  - eg. 투표 앱, 결과 앱 등 프런트엔드 앱에 외부에서 접근할 수 있음.
+  - 단점: 사용자에게 IP:Port 조합을 공유해야 하므로 URL이 불편함.
+- 단일 URL로 접근하는 방법?
+  - HAProxy나 Nginx 등의 소프트웨어를 설치한 별도 VM을 부하 분산기로 설정.
+  - 클러스터의 노드들로 트래픽을 라우팅하는 방식.
+  - 하지만 설정과 유지보수가 복잡함.
+- 클라우드 기반 LoadBalancer 사용
+  - GCP, AWS, Azure 등에서는 Service 타입을 LoadBalancer로 지정하면 클라우드가 자동으로 외부 부하 분산기를 구성해 줌.
+  - 외부 사용자는 단일 URL로 접근 가능.
+  - 단, 이 기능은 공식 지원되는 클라우드 환경에서만 동작.
+  - VirtualBox 등 로컬 환경에서는 NodePort처럼 동작함 (즉, 단일 URL 제공 불가).
+
+NodePort는 테스트나 간단한 환경에 적합하지만, 실제 배포 환경에서는 클라우드 플랫폼의 LoadBalancer 서비스를 사용하는 것이 사용자 접근성과 관리 측면에서 훨씬 유리함.
