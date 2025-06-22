@@ -148,7 +148,7 @@
 
 ### 주요 기능 및 역할
 - Node 등록: 클러스터에 자신을 Node로 등록.
-- 명령 수신: 스케줄러가 포드 배치를 지시하면,
+- 명령 수신: 스케줄러가 Pod 배치를 지시하면,
   - 컨테이너 런타임(Docker 등)을 호출하여,
   - 이미지를 pull하고 컨테이너를 실행.
 - 상태 보고: Pod/Container 상태를 감시하고 kube-apiserver에 지속적으로 보고.
@@ -170,7 +170,7 @@ kubelet 구성 및 인증서 생성, TLS 부트스트랩 과정.
 ### Pod Network와 Service
 - 클러스터 내부 Pod 간 네트워크 통신은 Pod Network를 통해 이루어짐.
 - Pod는 IP를 가지고 있지만, 이 IP는 영구적이지 않음 → 직접 접근은 위험.
-- 따라서 **서비스(Service)**를 생성하여 포드를 대표하게 하고, DNS 이름이나 서비스 IP를 통해 접근하게 한다.
+- 따라서 **서비스(Service)**를 생성하여 Pod를 대표하게 하고, DNS 이름이나 서비스 IP를 통해 접근하게 한다.
 - 단, 서비스는 가상 객체이며 실제 네트워크 인터페이스가 없음 → 바로 연결할 수 없음.
 
 ### kube-proxy의 역할
@@ -279,3 +279,39 @@ kubectl delete pods,services -l name=myLabel
 # 특정 리비전으로 롤백
 kubectl rollout undo deployment/frontend --to-revision=2
 ```
+
+## ReplicaSet
+### 컨트롤러란?
+- 쿠버네티스의 두뇌 역할
+- 클러스터 상태를 모니터링하고 원하는 상태로 자동 조정하는 역할
+
+### Replication Controller
+- Pod의 원하는 수를 유지
+- 고가용성 제공 (하나의 Pod가 죽어도 자동 복구)
+- 로드 분산 목적의 Pod 복제 가능
+- YAML 정의 파일 구성: apiVersion, kind, metadata, spec
+- `spec.replicas` : 원하는 Pod 수
+- `spec.template` : 복제에 사용될 Pod 템플릿
+- `kubectl create -f 파일명.yaml` 명령어로 생성
+- `kubectl get rc`, `kubectl get pods`로 상태 확인 가능
+
+## ReplicaSet
+- Replication Controller의 최신 대체 기술
+- `apiVersion`: `apps/v1` 사용
+- 핵심 구조는 유사하지만 **selector**가 필수
+- `matchLabels`로 어떤 Pod를 모니터링할지 지정
+- 이미 생성된 Pod도 동일 라벨이면 관리 가능
+- template은 여전히 필요 (향후 Pod 복구용)
+- 생성/삭제/확인 명령은 Replication Controller와 유사
+
+### 스케일링 및 관리
+- 수동 스케일링
+  - YAML 파일 내 replicas 수정 후 `kubectl replace -f 파일명.yaml`
+  - 또는 `kubectl scale rs/이름 --replicas=6`
+- 자동 스케일링
+
+### 정리
+- 컨트롤러는 클러스터 상태를 자동 유지
+- 복제 컨트롤러와 복제본 세트 모두 Pod를 복제해 고가용성을 보장
+- 복제본 세트는 선택기 기능을 통해 더 유연하고 권장됨
+- 템플릿은 향후 Pod 복구를 위한 정의로 항상 필요
