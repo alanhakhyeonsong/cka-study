@@ -587,3 +587,116 @@ metadata:
 
 ### 정리
 쿠버네티스의 네임스페이스는 클러스터 내에서 리소스를 논리적으로 분리하고 관리하기 위한 매우 중요한 개념이다. 실전 환경에서는 네임스페이스를 적극적으로 활용해 조직별, 환경별 자원 격리 및 정책 관리를 수행해야 한다.
+
+## Imperative vs Declarative
+| 접근 방식   | 설명                                  |
+| ------- | ----------------------------------- |
+| **명령적** | "무엇을 어떻게 할지" 단계별로 명령을 실행해 리소스를 관리   |
+| **선언적** | "최종 상태가 어떤지"만 선언하고, 시스템이 알아서 상태를 맞춤 |
+
+### 명령적 접근의 특징
+- `kubectl create`, `expose`, `edit`, `scale`, `set image`, `delete` 등 명령어 사용
+- 즉각적이고 직관적이지만, 히스토리 추적이 어려움
+- 복잡한 개체 관리에 한계 (다중 컨테이너, 환경 변수 등)
+- 시험에서 빠르게 작업할 때 유용
+- 실시간 수정을 원할 때는 `kubectl edit` 사용
+
+### 선언적 접근의 특징
+- YAML 구성 파일(매니페스트)로 리소스 상태 정의
+- `kubectl apply -f <파일>`로 생성, 업데이트, 삭제 가능
+- Git 등 코드 저장소에 버전 관리 가능
+- 변경 이력을 추적하고, 검토/승인 절차에 통합 가능
+- 파일만 수정하면 시스템이 현재 상태와 비교해 필요한 부분만 적용
+- 오류 발생률 낮음 (이미 존재하는 리소스에 대한 처리 능력 탁월)
+- eg: `kubectl apply -f deployment.yaml`
+
+### 실전 팁 (시험 대비)
+- 단순 Pod, Deployment 생성 → 명령적 방식으로 빠르게 처리
+- 복잡한 설정 필요(다중 컨테이너 등) → 구성 파일 + 선언적 적용
+- 실수 시 `kubectl apply`로 손쉽게 다시 적용 가능
+- 명령어 암기와 연습 필수: 시험 시간 단축에 중요
+- 공식 문서(kubernetes.io/docs)에서 명령 및 YAML 예제를 익숙히 해둘 것
+
+### 정리
+- 작은 작업이나 빠른 실험은 명령적 접근
+- 복잡한 환경이나 지속적 관리에는 선언적 접근이 권장됨
+- 쿠버네티스에서는 두 방식을 병행하여 상황에 맞게 활용하는 것이 중요함
+
+## Tips
+- 실무에서는 주로 선언적 방식(YAML 정의 파일) 을 사용하지만, 시험 중 빠른 작업 처리나 템플릿 생성에는 명령적 방식이 효과적
+- 이를 위해 두 가지 옵션을 조합해 사용
+
+| 옵션                 | 설명                       |
+| ------------------ | ------------------------ |
+| `--dry-run=client` | 실제 리소스를 만들지 않고 명령 검증만 수행 |
+| `-o yaml`          | YAML 형식으로 리소스 정의 출력      |
+
+### Pod 관련 명령어
+- NGINX 파드 생성
+
+```bash
+kubectl run nginx --image=nginx
+```
+
+- Pod 매니페스트(YAML)만 출력 (생성 X)
+```bash
+kubectl run nginx --image=nginx --dry-run=client -o yaml
+```
+
+### Deployment 관련 명령어
+- Deployment 생성
+```bash
+kubectl create deployment --image=nginx nginx
+```
+
+- Deployment YAML 파일만 출력
+
+```bash
+kubectl create deployment --image=nginx nginx --dry-run=client -o yaml
+```
+
+- 4개의 Replica를 가진 Deployment 생성
+```bash
+kubectl create deployment nginx --image=nginx --replicas=4
+```
+
+- 기존 Deployment 스케일 조정
+
+```bash
+kubectl scale deployment nginx --replicas=4
+```
+
+- Deployment YAML 저장 후 수정
+```bash
+kubectl create deployment nginx --image=nginx --dry-run=client -o yaml > nginx-deployment.yaml
+```
+
+### Service 관련 명령어
+- Redis Pod를 ClusterIP 서비스로 노출
+```bash
+kubectl expose pod redis --port=6379 --name redis-service --dry-run=client -o yaml
+```
+
+pod의 label을 selector로 자동 사용
+
+- ClusterIP 서비스 정의만 생성 (수동 selector 설정 필요)
+```bash
+kubectl create service clusterip redis --tcp=6379:6379 --dry-run=client -o yaml
+```
+label이 app=redis로 고정되므로, 다른 label을 가진 pod에는 부적절
+
+- nginx Pod를 NodePort 서비스로 노출 (포트 수동 설정 필요)
+```bash
+kubectl expose pod nginx --type=NodePort --port=80 --name=nginx-service --dry-run=client -o yaml
+```
+
+nodePort 직접 설정은 불가 – YAML 파일에서 수동 설정 필요
+
+- NodePort 서비스 정의만 생성 (selector 직접 설정 필요)
+```bash
+kubectl create service nodeport nginx --tcp=80:80 --node-port=30080 --dry-run=client -o yaml
+```
+
+`selector`는 `app=nginx`로 고정됨
+
+→ 추천: `kubectl expose` 명령을 사용하여 YAML 파일을 생성하고, 필요시 수동으로 `nodePort` 또는 `selector`를 설정한 후 적용
