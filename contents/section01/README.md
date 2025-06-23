@@ -1,4 +1,4 @@
-## Core Concept
+# Core Concept
 ## Cluster Architecture
 ![Image](https://github.com/user-attachments/assets/16a69c26-cfee-42d0-ba03-a13b5447f72d)
 
@@ -534,3 +534,56 @@ spec:
   - VirtualBox 등 로컬 환경에서는 NodePort처럼 동작함 (즉, 단일 URL 제공 불가).
 
 NodePort는 테스트나 간단한 환경에 적합하지만, 실제 배포 환경에서는 클라우드 플랫폼의 LoadBalancer 서비스를 사용하는 것이 사용자 접근성과 관리 측면에서 훨씬 유리함.
+
+## Namespaces
+- 집 = 네임스페이스
+- 마크라는 동일한 이름의 두 소년 → 각각 스미스 집, 윌리엄스 집 소속
+- 집 안에서는 이름만으로 구분 가능하지만, 외부에서는 풀네임(이름 + 집) 사용
+- 집마다 자원과 규칙이 독립적으로 존재함
+
+### Kubernetes Namespace?
+- 쿠버네티스 클러스터 내 리소스(Pod, Service 등)를 논리적으로 구분하기 위한 공간
+- 기본적으로 사용되는 네임스페이스: `default`
+- 클러스터 초기 설정 시 자동 생성되는 네임스페이스
+  - `kube-system`: 쿠버네티스 내부 서비스용
+  - `kube-public`: 모든 사용자에게 공개되는 리소스용
+
+### 사용 목적
+- 작은 학습용 클러스터에선 `default` 네임스페이스만으로 충분
+- 개발 / 운영 리소스를 분리하거나, 자원 할당/접근 제어가 필요할 때 유용
+
+### 사용 방법
+- 리소스를 생성하면 기본적으로 default 네임스페이스에 생성됨
+- 다른 네임스페이스에 리소스를 생성하려면
+  - kubectl 명령어에 `--namespace` 옵션 사용
+  - 또는 YAML 파일 내 `metadata.namespace` 정의
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+```
+
+`kubectl apply -f <파일명>` 또는 `kubectl create namespace dev`로 생성 가능
+
+### 네임스페이스 간 DNS
+- 서비스 접근 시 DNS 포맷
+  - `<서비스명>.<네임스페이스>.svc.cluster.local`
+
+### 리소스 조회
+- 기본 조회: `kubectl get pods`
+- 특정 네임스페이스 조회: `kubectl get pods -n <네임스페이스>`
+- 전체 네임스페이스 조회: `kubectl get pods --all-namespaces`
+
+### 기본 네임스페이스 설정
+`kubectl config set-context --current --namespace=dev`
+
+이후 kubectl 명령 시 `--namespace` 옵션 생략 가능
+
+### 자원 제한 : ResourceQuota
+- 네임스페이스별로 리소스 사용량 제한 가능
+- eg: Pod 개수, CPU, Memory 등
+
+### 정리
+쿠버네티스의 네임스페이스는 클러스터 내에서 리소스를 논리적으로 분리하고 관리하기 위한 매우 중요한 개념이다. 실전 환경에서는 네임스페이스를 적극적으로 활용해 조직별, 환경별 자원 격리 및 정책 관리를 수행해야 한다.
