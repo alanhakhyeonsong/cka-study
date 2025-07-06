@@ -122,3 +122,31 @@ dig www.google.com
 - 소규모 환경 → /etc/hosts로 수동 관리
 - 규모 커지면 → 중앙 DNS 서버 필요
 - 리눅스는 /etc/resolv.conf, /etc/nsswitch.conf로 DNS 클라이언트 설정
+
+## Core DNS
+- DNS 서버가 필요한 이유: 호스트 이름 ↔ IP 주소 매핑을 중앙 관리
+- 대규모 환경에서 이름 해석을 효율적으로 처리
+- 클라이언트가 사용할 DNS 서버를 어떻게 지정하는지 설명
+
+### CoreDNS 설치
+- GitHub 릴리스 페이지나 Docker 이미지에서 구할 수 있음
+- 예제에서는 curl/wget으로 바이너리 다운로드 후 압축 해제 → coredns 실행 파일 생성
+
+### CoreDNS 실행
+<img width="1473" height="813" alt="Image" src="https://github.com/user-attachments/assets/127d936b-ec60-4f95-90d2-5c67cd0b8235" />
+
+- 기본적으로 포트 53 사용
+- 그냥 실행하면 동작은 하지만 → IP/호스트 이름 매핑이 없음
+
+### IP/호스트 이름 매핑 지정
+<img width="1408" height="606" alt="Image" src="https://github.com/user-attachments/assets/a4a14c62-6efe-416d-bcd1-5c5417505094" />
+
+- 여러 방법 중 하나
+  - 서버의 /etc/hosts 파일에 항목 추가
+  - CoreDNS 설정파일(Corefile)에서 이 파일을 읽도록 지정
+- Corefile 예제: `/etc/hosts`를 데이터 소스로 사용하도록 설정
+
+정리하자면,
+- CoreDNS는 플러그인 기반
+- Kubernetes에서 사용하는 플러그인도 있음
+
