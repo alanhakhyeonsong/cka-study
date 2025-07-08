@@ -267,3 +267,76 @@ commonLabels:
 -	`kind: Kustomization`이 있어야 “이건 Kustomize 설정”이라고 인식
 -	이후 `resources`와 `commonLabels` 등의 세부 설정이 적용됨
 
+
+## Managing Directories
+-	초기에는 k8s 디렉터리에 여러 YAML 파일(API 배포, 서비스, DB 배포, 서비스 등)을 평면적으로 두고 `kubectl apply -f k8s/`로 한 번에 배포
+-	파일 수가 늘어나면 관리가 복잡해지고 폴더를 분리하게 됨
+
+```
+k8s/
+  api/
+    deployment.yaml
+    service.yaml
+  database/
+    deployment.yaml
+    service.yaml
+```
+
+### 문제점
+하위 디렉터리로 나눈다면,
+
+- 각 디렉터리별로 따로 들어가서 kubectl apply -f를 여러 번 실행해야 함
+- 디렉터리가 많아지면 매우 번거로움
+- CI/CD 파이프라인도 각 디렉터리를 반복 처리해야 함
+
+### Kustomize의 첫 번째 해결
+- 루트 디렉터리에 kustomization.yaml 추가
+- 이 파일에서 하위 디렉터리 경로를 모두 나열
+
+```yaml
+resources:
+  - api/
+  - database/
+```
+
+`kustomize build k8s/ | kubectl apply -f -` or `kubectl apply -k k8s/`
+
+-	한 번의 명령어로 모든 하위 디렉터리 적용 가능
+-	각 하위 디렉터리에 일일이 들어갈 필요 없음
+
+### 두 번째 문제 - 스케일 문제
+-	디렉터리가 2개 → 4개, 10개, 20개로 늘어나면?
+-	루트 `kustomization.yaml`의 `resources` 섹션이 너무 길어지고 지저분해짐
+-	수십~수백 개의 리소스 경로를 나열해야 함
+
+### Kustomize의 두 번째 해결 (계층적 구성)
+- 각 하위 디렉터리에도 자체 `kustomization.yaml` 작성
+
+```yaml
+# api/kustomization.yaml
+resources:
+  - deployment.yaml
+  - service.yaml
+
+---
+# database/kustomization.yaml
+resources:
+  - deployment.yaml
+  - service.yaml
+
+---
+# 루트(k8s/kustomization.yaml)는 하위 디렉터리만 나열
+resources:
+  - api/
+  - database/
+  - cache/
+  - kafka/
+```
+
+`kustomize build k8s/ | kubectl apply -f -` or `kubectl apply -k k8s/`
+
+-	각 폴더는 **자기 리소스만 관리**
+-	루트는 **하위 폴더를 포함만** → 깔끔하고 유지보수성 향상
+-	수백 개의 리소스를 계층적이고 모듈화된 형태로 관리 가능
+- 루트 디렉터리에서 한 번의 명령으로 모든 리소스 배포
+- CI/CD 파이프라인도 단일 단계로 관리 가능
