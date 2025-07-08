@@ -204,4 +204,66 @@ commonLabels:
   -	단순히 결과 YAML을 출력 → 실제 배포는 별도로 수행
 
 ## Kustomize Output
+-	`kustomize build` 명령
+	-	모든 리소스와 변환을 합쳐서 최종 YAML 출력 생성
+	-	Kubernetes에 적용하지는 않음
+	-	→ 출력만 콘솔에 보여줌
+
+### 배포
+- 출력된 YAML을 `kubectl apply`로 넘겨야 실제 클러스터에 적용됨
+-	일반적인 적용 명령 예
+
+`kustomize build k8s/ | kubectl apply -f -`
+
+-	`kustomize build k8s/` → 최종 매니페스트 생성
+-	`|`(파이프) → 출력을 다음 명령으로 전달
+-	`kubectl apply -f -` → 표준 입력(-)에서 받은 YAML을 클러스터에 적용
+
+### kubectl -k 방식 배포
+- `kubectl`은 `-k` 옵션으로 Kustomize 내장 지원
+
+`kubectl apply -k k8s/`
+- `-k`는 지정한 디렉토리의 kustomization.yaml을 자동 처리
+
+### 삭제(제거) 방법
+- 적용과 거의 동일 → `apply` → `delete`로 변경  
+  - `kustomize build k8s/ | kubectl delete -f -`
+  - 파이프를 통해 빌드한 리소스 정의를 삭제 명령에 전달
+- kubectl 내장 방식
+  - `kubectl delete -k k8s/`
+
 ## Kustomize ApiVersion & Kind
+- `apiVersion`
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+```
+- kustomize 팀이 만든 kustomization CRD(Custom Resource Definition)의 버전
+- Kustomize CLI가 이 버전을 읽고 올바르게 파싱함
+
+- `kind`
+  - 리소스의 종류 명시
+
+```yaml
+kind: Kustomization
+```
+
+- 이 YAML 파일이 Kustomize의 설정을 정의하는 파일이다 라는 선언
+- Kustomize CLI가 이 파일을 **설정의 진입점**으로 인식
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+commonLabels:
+  app: myapp
+```
+
+-	`apiVersion`이 맞아야 Kustomize가 이해함
+-	`kind: Kustomization`이 있어야 “이건 Kustomize 설정”이라고 인식
+-	이후 `resources`와 `commonLabels` 등의 세부 설정이 적용됨
+
