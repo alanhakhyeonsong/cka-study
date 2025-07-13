@@ -226,3 +226,325 @@
   - iptables / IPVS / userspace 방식 지원.
 - Service와 Pod는 서로 다른 IP 범위를 가지며, IP 충돌 방지.
 
+## DNS in Kubernetes
+### DNS란 무엇인가?
+-	도메인 이름을 IP 주소로 변환해주는 시스템.
+-	`nslookup`, `dig` 같은 유틸리티 도구로 DNS 기록을 조회할 수 있음.
+-	다양한 DNS 기록 유형이 존재.
+
+### 쿠버네티스에서 DNS 구성
+-	쿠버네티스는 클러스터 생성 시 기본 내장 DNS 서버(CoreDNS) 를 함께 배포.
+-	Pod와 Service 간 통신에 DNS를 활용.
+
+### 클러스터 내부 DNS 해상도
+-	Pod → Service 혹은 Pod → Pod 간 IP 주소 없이 이름으로 통신 가능.
+-	DNS 이름을 통해 클러스터 내 리소스를 식별하고 접근.
+
+### 서비스에 대한 DNS 구성
+-	Service가 생성되면 DNS 서버는 자동으로 도메인 이름을 생성.
+-	네임스페이스 내부에서는 Service 이름만으로 접근 가능.
+-	다른 네임스페이스에서 접근하려면 → `서비스이름.네임스페이스.svc.cluster.local`
+
+### 네임스페이스와 도메인 구성
+-	각 네임스페이스는 DNS의 하위 도메인으로 구성됨.
+-	Service는 svc 하위 도메인에, Pod는 pod 하위 도메인에 포함.
+-	클러스터 루트 도메인은 기본적으로 cluster.local.
+
+### Pod에 대한 DNS
+-	Pod는 기본적으로 DNS 기록이 생성되지 않지만 명시적으로 설정하면 가능.
+-	Pod 이름 대신 IP를 대시(-)로 바꿔서 DNS 이름 구성 : `10-244-1-5.default.pod.cluster.local`
+
+쿠버네티스 클러스터에서는 Pod와 Service가 DNS 이름을 통해 서로 통신할 수 있으며, 네임스페이스와 도메인 구조를 이해하면 이름 기반 접근 방식을 효율적으로 활용할 수 있다.
+
+## CoreDNS in Kubernetes
+### 왜 DNS가 필요한가?
+-	Pod끼리 통신하려면 IP 주소를 알아야 하지만, Pod는 수시로 생성/삭제되기 때문에 정적인 `etc/hosts` 방식은 불가능.
+-	따라서 중앙 DNS 서버(CoreDNS) 를 통해 Pod 및 Service 이름을 자동으로 해석하게 함.
+
+### CoreDNS의 동작 원리
+-	CoreDNS는 쿠버네티스 클러스터 내 `kube-system` 네임스페이스에 Pod로 배포됨.
+-	보통 Deployment(또는 ReplicaSet) 형태로 2개 이상의 복제본이 실행됨.
+-	설정 파일은 Corefile로, 다양한 플러그인(plugin) 을 통해 기능 확장 가능.
+
+### Corefile 설정
+-	CoreDNS는 Corefile을 통해 다음과 같은 기능을 설정
+  -	오류 처리, 로깅, 모니터링
+  -	kubernetes 플러그인을 통해 클러스터 내부 Service/Pod의 이름 해석
+  -	클러스터 최상위 도메인: 기본값은 `cluster.local`
+
+### Service 이름 해석 방식
+-	Service 생성 시 자동으로 DNS 레코드가 생성됨.
+-	네임스페이스 내에선 Service 이름만으로 접근 가능.
+-	다른 네임스페이스에 있는 경우 FQDN(정규 도메인 이름) 필요: `서비스명.네임스페이스.svc.cluster.local`
+
+### Pod 이름 해석 방식
+-	Pod에 대한 DNS 기록은 기본값으로는 비활성화되어 있음.
+-	설정 시 Pod IP를 대시(-)로 변환한 호스트명 형태로 생성 가능
+- eg: `10-244-1-5.default.pod.cluster.local`
+
+### DNS 서버 주소는 어떻게 설정되나?
+-	각 Pod가 사용하는 DNS 서버는 CoreDNS Service의 클러스터 IP.
+-	CoreDNS는 클러스터 내 kube-dns라는 이름의 클러스터IP Service로 노출됨.
+-	Pod가 생성될 때 kubelet이 해당 DNS 주소로 `/etc/resolv.conf`를 자동 설정.
+
+### 검색 도메인 (search domain)
+- Pod 내부의 `/etc/resolv.conf`에 search 도메인이 자동 설정됨.
+- eg: `default.svc.cluster.local`, `svc.cluster.local`, `cluster.local`
+- 덕분에 `web-service`, `web-service.default`, `web-service.default.svc` 등 다양한 방식으로 접근 가능.
+
+### 정리
+-	쿠버네티스는 CoreDNS를 통해 Pod와 서비스 이름을 IP로 자동 변환할 수 있게 하고,
+-	각 Pod는 자동으로 CoreDNS를 DNS 서버로 설정해, 손쉽게 다른 Pod나 서비스와 통신 가능.
+-	설정 파일(Corefile)은 ConfigMap으로 관리되며, 필요시 수정 가능.
+
+## Ingress
+### 기초 시나리오: 간단한 NodePort / LoadBalancer 설정
+-	애플리케이션과 MySQL 데이터베이스를 Kubernetes에 배포하고, 내부 통신은 ClusterIP 서비스(mysql-service)로 처리.
+-	외부에서 접속하려면 NodePort 서비스를 이용해 포트(예: 38080)로 노출.
+-	퍼블릭 클라우드(GCP 등)에서는 LoadBalancer 타입을 통해 외부 IP 자동 할당 가능.
+-	그러나 **서비스가 많아질수록 로드밸런서 비용 증가, 복잡한 포트 관리, SSL 설정의 어려움 등 문제가 발생.**
+
+### 이 문제들을 해결하기 위한 솔루션 → Ingress
+-	Ingress는
+  -	클러스터 외부에서 단일 URL 또는 도메인으로 접근 가능하게 하고,
+  -	경로(path) 또는 호스트(host) 기준으로 트래픽을 내부 여러 서비스로 라우팅.
+  -	SSL(HTTPS)도 중앙에서 쉽게 설정 가능.
+-	일종의 L7(애플리케이션 계층) 로드밸런서.
+
+### Ingress 구조
+-	Ingress Controller: Nginx, Traefik, HAProxy 등. 클러스터에 배포해야 함 (기본 포함 X).
+-	Ingress Resource: 트래픽 라우팅 규칙을 담은 Kubernetes 리소스 정의 (YAML).
+-	컨트롤러는 Ingress 리소스를 감지하고 내부적으로 Nginx 설정을 자동 생성 및 반영.
+
+### Nginx Ingress Controller 구성
+-	Nginx Ingress Controller는 별도의 Deployment로 설치
+  -	적절한 이미지, 실행 명령어, ConfigMap(옵션 설정), NodePort 서비스 등 포함.
+  -	컨트롤러가 클러스터 내부의 Ingress 리소스를 감시하고, 요청을 적절한 서비스로 라우팅.
+
+```yaml
+apiVersion: extentions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx-ingress-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: nginx-ingress
+  template:
+    metadata:
+      labels:
+        name: nginx-ingress
+    spec:
+      containers:
+        - name: nginx-ingres-controller
+          image: quay.io/kubernetes-ingress-controller/nginx-ingress-controller:0.21.0
+      args:
+        - /nginx-ingress-controller
+        - --configmap=$(POD_NAMESPACE)/nginx-configuration
+      env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+      ports:
+        - name: http
+          containerPort: 80
+        - name: https
+          containerPort: 443
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-configuration
+# ...
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-ingress
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+  selector:
+    name: nginx-ingress
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-ingress-serviceaccount
+# ...
+```
+
+<img width="1136" height="549" alt="Image" src="https://github.com/user-attachments/assets/6e7b2055-c0c2-4632-b85e-e4be30331f09" />
+
+### Ingress Resource 예시
+-	`Ingress` 정의 파일 (wear-ingress.yaml 등) 구성
+-	`apiVersion`, `kind: Ingress`, `metadata`, `spec` 포함.
+-	`spec.rules`: 특정 도메인(host)에 대해 경로(path)별로 어떤 서비스로 라우팅할지 명시.
+-	`defaultBackend`: 규칙과 일치하지 않을 때 보내는 기본 서비스 (예: 404 Not Found 페이지용).
+
+```yaml
+# ingress-wear.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-wear
+spec:
+  backend:
+    serviceName: wear-service
+    servicePort: 80
+---
+# ingress-wear-watch.yaml (path 기반)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-wear
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /wear
+        pathType: prefix
+        backend:
+          service:
+            name: wear-service
+            port:
+              number: 80
+      - path: /watch
+        pathType: prefix
+        backend:
+          service:
+            name: watch-service
+            port:
+              number: 80
+```
+
+```yaml
+# (host 기반)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-wear
+spec:
+  rules:
+  - host: wear-my-online-store.com
+    http:
+      paths: /
+      pathType: prefix
+      backend:
+        service:
+          name: wear-service
+          port: 
+            number: 80
+  - host: watch-my-online-store.com
+    http:
+      paths: /
+      pathType: prefix
+      backend:
+        service:
+          name: watch-service
+          port:
+            number: 80
+```
+
+### 라우팅 방식 요약
+-	Path 기반 라우팅
+  -	하나의 도메인 내에서 `/wear`, `/watch` 등 URL에 따라 다른 서비스로 라우팅.
+-	Host 기반 라우팅
+  -	`wear.mystore.com`, `watch.mystore.com`처럼 도메인 이름에 따라 라우팅.
+-	복합 구성도 가능: host + path 조합으로 다양한 세부 라우팅.
+
+### 운영상의 이점
+-	단일 Ingress Controller로 트래픽을 집중 관리 → 비용 절감
+-	애플리케이션 코드 수정 없이 HTTPS 지원 및 경로 기반 라우팅
+-	모든 설정을 YAML 정의 파일로 관리 가능 → GitOps, IaC 실현 가능
+
+### 정리
+Kubernetes Ingress는 외부 요청을 하나의 진입점으로 받아 경로(path) 또는 도메인(host)에 따라 내부 여러 서비스로 분산시키고, SSL 등 보안 기능까지 통합 제공하는 강력한 L7 로드밸런서 솔루션이다.
+
+## Ingress - Annotations, Rewrite-Target
+### 애플리케이션 설명
+- watch 앱은 `<watch-service>:<port>/`에서 비디오 스트리밍 페이지를 제공.
+-	wear 앱은 `<wear-service>:<port>/`에서 의류 페이지를 제공.
+
+Ingress 설정을 다음과 같이 하고자 함.
+
+|외부에서 접속한 주소 | 실제 내부 포워딩 대상|
+|--|--|
+|`http://<ingress-service>:<ingress-port>/watch`| `http://<watch-service>:<port>/`|
+|`http://<ingress-service>:<ingress-port>/wear`|`http://<wear-service>:<port>/`|
+
+여기서 중요한 점은, /watch, /wear 경로는 Ingress에서만 설정된 것이고, 실제 애플리케이션은 이 경로를 전혀 알지 못함.
+
+### 문제 상황: rewrite-target 없이 라우팅할 경우
+|외부 URL|내부 포워딩 결과|
+|--|--|
+|`/watch`|`/watch`|
+|`/wear`|`/wear`|
+
+즉, 내부 애플리케이션은 `/<경로>`가 붙은 URL을 받게 되고, 이 경로를 처리할 수 없으므로 404 Not Found 오류가 발생.
+
+### 해결 방법: rewrite-target 사용
+`rewrite-target` 옵션을 사용하면 Ingress에서 받은 경로를 내부로 전달할 때 원하는 경로로 바꿔줄 수 있다.
+
+```yaml
+nginx.ingress.kubernetes.io/rewrite-target: /
+```
+
+- 사용자가 `/watch`, `/wear`로 요청해도 실제로는 `/`로 바꿔서 내부 서비스에 전달.
+- 이건 `replace("/path", "/")`와 같은 동작.
+- 즉, Ingress의 path 설정을 `/pay`로 하면, 요청이 `http://.../pay`일 때 `http://pay-service/`로 전달되도록 경로를 수정하는 것.
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: test-ingress
+  namespace: critical-space
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /pay
+        backend:
+          serviceName: pay-service
+          servicePort: 8282
+```
+
+`/pay`로 들어온 요청은 `pay-service:8282/`로 전달됨.
+
+```yaml
+annotations:
+  nginx.ingress.kubernetes.io/rewrite-target: /$2
+...
+path: /something(/|$)(.*)
+```
+
+- `/something/abc` → `/abc`
+- `/something` → `/`
+
+이 방식은 정규표현식을 활용하여 유연하게 경로를 처리
+
+### 정리
+|항목|설명|
+|--|--|
+|문제|Ingress로 경로를 나누어도, 내부 서비스가 해당 경로를 알지 못하면 404 오류 발생|
+|해결|`nginx.ingress.kubernetes.io/rewrite-target` 어노테이션으로 **경로를 내부 서비스에 맞게 수정**|
+|기본 예시|`/watch` → `/`, `/wear` → `/` 로 rewrite|
+|정규표현식 예시|`/something/abc` → `/abc` 와 같은 유연한 매핑 가능|
+|사용 목적|Ingress path를 기준으로 **다양한 서비스를 연결하면서도 내부 애플리케이션 수정 없이 트래픽 라우팅** 가능|
