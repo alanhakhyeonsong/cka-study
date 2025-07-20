@@ -196,15 +196,15 @@ affinity:
 ### Node Affinity 유형
 - `requiredDuringSchedulingIgnoredDuringExecution`
   - 필수 조건
-  - 스케줄러가 반드시 이 조건을 만족하는 노드에만 포드 배치
-  - 조건 불일치 → 스케줄 실패 (포드 Pending 상태)
+  - 스케줄러가 반드시 이 조건을 만족하는 노드에만 Pod 배치
+  - 조건 불일치 → 스케줄 실패 (Pod Pending 상태)
 - `preferredDuringSchedulingIgnoredDuringExecution`
   - 선호 조건
   - 스케줄러가 최대한 조건 맞춰서 배치 시도
   - 조건 만족 노드 없으면 아무 노드에나 배치 가능
 - 특징
   - 둘 다 스케줄 시에만 평가됨
-  - 스케줄 이후 노드 라벨이 변경돼도 이미 배치된 포드는 그대로 실행됨
+  - 스케줄 이후 노드 라벨이 변경돼도 이미 배치된 Pod는 그대로 실행됨
 
 ### 예제
 - Node Label 추가  
@@ -228,3 +228,85 @@ spec:
 - 스케줄링 시 복잡한 조건 지원.
 - 다만, 스케줄 이후에는 라벨 변화 무시(Pod는 계속 실행됨).
 - 실행 단계에서 조건 검증하는 기능은 차후 정리.
+
+## Resource Limits
+### 스케줄링 개요
+- 클러스터 환경: 3개의 노드(각각 가용 CPU/메모리 보유)
+- 스케줄러 역할:
+  - Pod가 요구(request)하는 리소스 양과
+  - 각 노드의 사용 가능한 리소스를 비교
+  - 충분한 곳에만 Pod를 배치
+  - 부족하면 Pod 스케줄을 보류(“Pending”)
+
+### 리소스 요청(Request)
+- 컨테이너가 최소한으로 보장받아야 할 CPU/메모리
+- 스케줄러는 이 값을 기준으로 적절한 노드를 선택
+
+```yaml
+resources:
+  requests:
+    cpu: "1"        # 1 vCPU
+    memory: "1Gi"   # 1 Gibibyte
+```
+
+### 리소스 한도(Limit)
+- 컨테이너가 최대 사용할 수 있는 CPU/메모리
+- 초과 시 CPU는 쓰로틀링(throttling), 메모리는 OOM(kill) 발생
+
+```yaml
+resources:
+  limits:
+    cpu: "2"         # 최대 2 vCPU
+    memory: "512Mi"  # 최대 512 Mebibyte
+```
+
+### 단위 정리
+- CPU
+- 1 CPU = 1 vCPU (AWS, GCP의 코어 혹은 하이퍼스레드 1개)
+- m 단위: 1000m = 1 CPU, 최소 1m
+- 메모리
+- SI 단위: 1 G = 1 000 000 000 바이트
+- Binary 단위: 1 Gi = 1 024 Mi (1 GiB = 1 073 741 824 바이트)
+
+### 기본 동작(요청/한도 미설정 시)
+- 디폴트: 요청(request), 한도(limit) 모두 없음
+- Pod는 필요에 따라 노드의 모든 리소스 소비 가능
+- 다른 워크로드 혹은 시스템 프로세스가 영향을 받을 수 있음
+
+### LimitRange
+- 네임스페이스 단위로 디폴트 요청/한도, 최소·최대값 지정
+
+```yaml
+kind: LimitRange
+spec:
+  limits:
+  - type: Container
+    defaultRequest:
+      cpu: "500m"
+      memory: "500Mi"
+    default:
+      cpu: "1"
+      memory: "1Gi"
+    min:
+      cpu: "100m"
+      memory: "100Mi"
+    max:
+      cpu: "2"
+      memory: "2Gi"
+```
+- 적용 이후 생성되는 새 Pod에만 반영
+
+### ResourceQuota
+- 네임스페이스 전체가 사용할 수 있는 총 요청(request), 총 한도(limit) 한도 설정
+
+```yaml
+kind: ResourceQuota
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "4Gi"
+    limits.cpu: "10"
+    limits.memory: "10Gi"
+```
+
+- 쿼터 초과 시 더 이상 Pod 생성 불가
