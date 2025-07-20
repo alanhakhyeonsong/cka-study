@@ -548,3 +548,42 @@ path: /something(/|$)(.*)
 |기본 예시|`/watch` → `/`, `/wear` → `/` 로 rewrite|
 |정규표현식 예시|`/something/abc` → `/abc` 와 같은 유연한 매핑 가능|
 |사용 목적|Ingress path를 기준으로 **다양한 서비스를 연결하면서도 내부 애플리케이션 수정 없이 트래픽 라우팅** 가능|
+
+## Introduction to Gateway API
+Ingress의 한계
+-	멀티테넌시 지원 부족
+-	단일 Ingress 리소스를 여러 팀이 함께 관리해야 해 충돌(조율) 발생
+-	기능 확장성 제약
+-	호스트 매칭·경로 매칭 외에 TCP/UDP 라우팅, 트래픽 분할, 헤더 조작, 인증, 속도 제한 등을 기본 지원하지 않음
+-	컨트롤러별 어노테이션 의존성
+-	NGINX, Traefik 등 컨트롤러 전용 어노테이션을 사용해야 해 쿠버네티스 스펙으로 검증·표준화 불가
+
+### Gateway API 등장 배경
+- Ingress의 한계를 극복하고, 레이어 4·7 라우팅과 멀티테넌시를 공식 Kubernetes 리소스로 제공하기 위해 탄생
+- “차세대 쿠버네티스 인그레스·로드밸런싱·서비스 메시 API”를 지향
+
+### 주요 리소스 모델
+-	GatewayClass
+	- 인프라 공급자(클러스터 관리자)가 정의
+	- 어떤 컨트롤러(예: NGINX, Traefik, Envoy 등)로 트래픽을 처리할지 지정
+-	Gateway
+	- 클러스터 운영자가 인스턴스를 생성
+	- 포트·프로토콜(HTTP, HTTPS, TCP 등)별 리스너 설정
+-	Route (HTTPRoute 등)
+	- 애플리케이션 개발자가 작성
+	- Gateway가 수신한 트래픽을 어떤 서비스로, 어떤 조건(호스트·경로·가중치 등)으로 분기할지 정의
+	- HTTPRoute 외에 TLSRoute, TCPRoute, UDPRoute, GRPCRoute 등 다양
+
+### Gateway API의 특징 및 장점
+- 선언적·구조화된 스펙
+  - 어노테이션 불필요, 스키마 기반 검증 가능
+- TLS 종료 및 리디렉션
+  - Listener에 직접 TLS 설정 및 리디렉션 정책 포함
+- 트래픽 분할(카나리아 배포)
+  - 백엔드 서비스 버전별 가중치(예: 80% → v1, 20% → v2) 명시적 정의
+- 필터 체인
+  - CORS, 헤더 조작, 인증, 속도 제한 등 다양한 필터를 스펙 내에서 일관되게 구성
+
+### 주요 구현체 현황
+아래 항목들은 GA 상태 또는 구현 중
+-	Amazon EKS, Azure Application Gateway, Contour, Easegress, Envoy Gateway, GKE, HAProxy Ingress Controller, Istio, Kong, Kuma, NGINX Gateway, Traefik 등
