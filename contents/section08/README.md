@@ -208,3 +208,34 @@ spec:
 ```
 
 위 예시는 Deployment, ReplicaSets의 경우도 동일함.
+
+## Storage Class
+### 정적 프로비저닝의 한계
+- PVC를 사용하려면 사전에 클라우드(예: GCP)에서 디스크를 직접 생성하고
+- 그 이름으로 PV를 수동 작성해야 함 → 반복적·수작업 발생
+
+### 동적 프로비저닝 개념
+- StorageClass를 통해 프로비저너(provisioner)를 정의
+- PVC에 해당 StorageClass를 지정하면
+	1. 쿠버네티스가 프로비저너를 호출해 클라우드에 디스크 생성
+	2. 자동으로 PV 객체를 만들어 PVC에 바인딩
+
+### StorageClass 설정 예시
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+provisioner: kubernetes.io/gce-pd     # GCE Persistent Disk 프로비저너
+parameters:
+  type: pd-ssd                        # 디스크 유형 (표준/SSD 등)
+  replication-type: regional          # 복제 모드 등
+```
+
+### 다양한 프로비저너 및 매개변수
+- GCE PD 외에도 AWS EBS, Azure Disk/File, CephFS, Portworx, ScaleIO 등 지원
+- 각 프로비저너별로 디스크 유형, IOPS, 복제 정책 등 세부 파라미터 설정 가능
+
+### 스토리지 클래스 활용
+- 여러 StorageClass(예: `silver/gold/platinum`)를 미리 정의하여
+- 애플리케이션별 요구 성능·내구성에 맞춰 PVC에서 간단히 선택
