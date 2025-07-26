@@ -423,7 +423,7 @@ kubectl describe daemonset <이름>
 
 ## Multiple Schedulers
 ### 다중 스케줄러가 필요한 이유
-- 기본 스케줄러가 제공하는 정책(테인, 관용, 친화성 등)으로 충분하지 않을 때
+- 기본 스케줄러가 제공하는 정책(Taint, Tolerance, Affinity 등)으로 충분하지 않을 때
 - 특정 워크로드만을 위한 고유한 스케줄링 로직(예: 노드별 특수 조건) 적용을 위해
 
 ### 사용자 정의 스케줄러 제작 및 패키징
@@ -485,3 +485,128 @@ kubectl get events -o wide
 kubectl logs deployment/my-scheduler -n kube-system
 ```
 
+## Configuring Scheduler Profiles
+### 스케줄러 파이프라인 단계
+1. 큐(Queue) 단계: 대기 중인 Pod를 우선순위 기준으로 정렬(QueueSort 플러그인)
+2. PreFilter → Filter 단계: 각 Pod가 실행 가능한 노드를 걸러냄
+  - 예: `NodeResourcesFit`(리소스 요구), `NodeName`(특정 노드 지정), `NodeUnschedulable`(드레인된 노드 제외)
+3. PostFilter → Score 단계: 필터 통과한 노드에 점수 부여
+  - 예: `LeastRequested`(여유 리소스), `ImageLocality`(이미지 캐시)
+4. Reserve → Permit → PreBind → Bind → PostBind 단계: 최종 노드에 Pod를 예약·승인·바인딩
+  - 기본 바인딩은 `DefaultBinder` 플러그인 담당
+
+### 플러그인 확장 포인트
+- 각 단계마다 `preFilter`, `postFilter`, `score`, `reserve`, `permit`, `preBind`, `postBind` 등 다양한 확장 지점이 있어
+- 사용자는 필요에 따라 표준 플러그인 활성화/비활성화하거나, 자체 플러그인을 개발해 삽입 가능
+
+### 기존 다중 스케줄러의 문제
+- 서로 다른 바이너리(프로세스)로 운영 → 관리 복잡, 스케줄 충돌 우려
+
+### 스케줄러 프로필 도입(1.18, CAP 1451)
+- 단일 kube-scheduler 바이너리 안에 여러 프로필(profiles 배열)을 정의
+- 각 프로필에 고유한 `schedulerName`과 플러그인 설정(활성·비활성·가중치)을 지정
+- 프로필별로 다른 스케줄링 로직·조건 적용 가능
+
+### 사용 방법 요약
+1. ConfigMap 또는 파일로 스케줄러 설정 작성
+2. `profiles:` 항목에 프로필별 이름·플러그인 구성 추가
+3. 스케줄러 실행 시 `--config`로 해당 설정 로드
+4. Pod 정의에 `spec.schedulerName: <프로필명>` 지정 → 해당 프로필로 스케줄링
+
+## Admission Controllers
+### Admission Controller 개념
+- API 서버에 도달한 요청은 인증(Authentication) → 권한 부여(Authorization) 단계를 거친 뒤, Admission Controller를 통해 최종 검증·변경·거부
+- RBAC으로는 불가능한 “이미지 레지스트리 제한”, “루트 사용자 실행 금지”, “레이블 강제 삽입” 등 추가 정책 구현
+
+### 주요 기능
+- Validation: 요청된 오브젝트의 스펙 유효성 검사
+- Mutation: 요청을 자동으로 수정하거나 기본값 추가(예: `alwaysPullImages`, 기본 스토리지 클래스 지정)
+- Rate Limiting: API 서버 과부하 방지(`EventRateLimit`)
+- 네임스페이스 검사·프로비저닝: 존재하지 않는 네임스페이스 요청 거부 또는 자동 생성
+
+### 기본 내장 컨트롤러 예시
+- `AlwaysPullImages`
+- `DefaultStorageClass`
+- `EventRateLimit`
+- `NamespaceLifecycle` (구 `NamespaceExists` + 자동 프로비저닝 대체)
+
+### Admission Controller 활성화/비활성화
+- kube-apiserver 실행 시 `--enable-admission-plugins/--disable-admission-plugins` 플래그로 설정
+- kubeadm 환경: `/etc/kubernetes/manifests/kube-apiserver.yaml` 내 `command:` 섹션에 해당 플래그 추가 또는 수정
+
+### 네임스페이스 자동 프로비저닝 사례
+1. 네임스페이스가 없는 상태에서 파드 생성 요청
+2. Admission Controller(`NamespaceLifecycle` 이전엔 `NamespaceAutoProvision`)가 요청 감지
+3. 네임스페이스 자동 생성 후 파드 생성 완료
+
+현재 활성화된 Admission Controller 리스트 확인
+
+```bash
+kubectl exec -n kube-system kube-apiserver-<pod> -- \
+  kube-apiserver -h | grep admission
+```
+
+## Validating and Mutating Admission Controllers
+### 내장(In-tree) 컨트롤러 예시
+- 유효성 검사(Validating)
+  - NamespaceExists / NamespaceLifecycle: 네임스페이스 존재 여부 검사·거부
+- Mutating
+  - DefaultStorageClass: PVC에 스토리지 클래스 미지정 시 기본값 삽입
+  - AlwaysPullImages, EventRateLimit 등
+
+### Mutating vs Validating 순서
+1. MutatingAdmissionController 실행 → 객체 스펙 변경
+2. ValidatingAdmissionController 실행 → 변경된 스펙 검증·허용/거부
+
+### 커스텀 Admission Webhook
+- 외부(또는 클러스터 내) 서버에서 MutatingAdmissionWebhook / ValidatingAdmissionWebhook 구현 가능
+- AdmissionReview 객체(JSON)로 요청 정보(사용자, 작업, 리소스, 오브젝트 등) 전달
+- 서버는 AdmissionReview 응답(allowed: true/false, 또는 JSON Patch)을 반환
+
+### 설정 단계
+1. 웹훅 서버 개발·배포
+  - Go, Python 등 언어로 AdmissionReview API 핸들러 구현
+  - 사용자 요청에 따라 허용/거부 또는 JSON Patch 생성
+  - 클러스터 내 Deployment + Service로 배포하거나 외부에서 호스팅
+2. TLS 인증 구성
+  - 웹훅 서버용 인증서·키 준비
+  - caBundle에 CA 인증서(base64) 설정
+3. WebhookConfiguration 생성
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration  # MutatingWebhookConfiguration도 비슷
+metadata:
+  name: my-validating-webhook
+webhooks:
+  - name: pod-policy.example.com
+    clientConfig:
+      service:
+        name: webhook-service
+        namespace: my-namespace
+        path: "/validate"
+      caBundle: <base64-encoded-CA>
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+```
+
+4. 운영
+  - 지정된 리소스·작업에 대해 API 서버가 `AdmissionReview` 호출
+  - 웹훅 서버 응답에 따라 요청이 허용되거나 거부
+  - Mutating 웹훅의 경우 JSON Patch로 오브젝트 자동 수정
+
+
+사용자 레이블 삽입 Mutating Webhook 예시
+```python
+def mutate(admission_request):
+    user = admission_request.userInfo.username
+    patch = [{
+      "op": "add",
+      "path": "/metadata/labels/username",
+      "value": user
+    }]
+    return AdmissionResponse(allowed=True, patch=base64_encode(json.dumps(patch)))
+```
