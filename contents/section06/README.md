@@ -70,3 +70,50 @@
     4. `apt-get install -y kubelet=<목표버전>` → 서비스 재시작
     5. `kubectl uncordon <노드명>`
 
+## Backup and Restore Methods
+### 백업 대상
+- 쿠버네티스 리소스 정의
+  - Deployment, Pod, Service, ConfigMap, Secret, Namespace 등
+  - 애플리케이션에 필요한 모든 객체의 manifest 파일
+- 영구 스토리지 데이터
+  - PVC로 연결된 볼륨 등 영구 저장소에 보관된 데이터
+
+### 선언적(Manifest) 백업
+1. 소스 코드 리포지토리 활용
+  - 모든 리소스 정의 파일을 Git 등에 보관
+  - 클러스터 손실 시 `kubectl apply -f` 만으로 재배치
+2. 폴더 구조 관리
+  - 앱별 디렉토리에 관련 객체 YAML 파일 집합
+  - 협업·재사용 용이
+
+### 명령적(API 쿼리) 백업
+1. kubectl로 리소스 추출
+  - `kubectl get all,cm,secret -n <namespace> -o yaml`
+  - 스크립트화해 주기적으로 전체 네임스페이스의 리소스를 덤프
+2. 자동화 도구 이용
+  - Velero, Ark 등
+    - API 서버 호출로 리소스 정의 + 볼륨 스냅샷까지 통합 백업 제공
+
+### etcd 스냅샷 백업
+1. etcd 데이터 디렉터리 지정
+  - `--data-dir` 설정으로 스냅샷 대상 디렉터리 지정
+2.	내장 스냅샷 커맨드
+  - `etcdctl snapshot save <파일경로>`
+  - `etcdctl snapshot status <파일>`로 백업 상태 확인
+
+### 복구(Restore) 절차
+1. API 서버 중단
+2. 스냅샷 복원
+  - `etcdctl snapshot restore <백업파일> \   --data-dir=<새데이터디렉터리> \   --initial-cluster=<새멤버구성>`
+3. 클러스터 재구성
+  - kube-apiserver, controller-manager, scheduler가 새 etcd 경로 사용하도록 설정
+4. 서비스 재시작
+  - kubelet 등 관련 데몬 재시작 후 정상 동작 확인
+5. 인증서·엔드포인트 설정 유의
+  - etcd TLS 인증서, API 서버 인증서·키 지정
+
+### 선택 가이드
+- 관리형 클러스터(GKE, EKS 등)
+  - 사용자 등 접근이 제한적 → API 쿼리(velero) 방식 권장
+- 자체 호스팅 클러스터
+  - etcd 스냅샷 + manifest 백업 병행 → 완전 복구 가능
