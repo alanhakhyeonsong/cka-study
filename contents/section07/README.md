@@ -271,11 +271,11 @@
 - Kube API Server는 클러스터와 상호작용하는 중심 컴포넌트
 - `kubectl`이나 REST API를 통해 모든 작업이 API 서버로 전달됨
 - 기본 포트: 6443
-- eg: `/api/v1/pods` → 포드 목록 조회
+- eg: `/api/v1/pods` → Pod 목록 조회
 
 ### API 그룹 구조
 - 핵심(Core) 그룹
-  - 네임스페이스, 포드, 서비스, 이벤트, 노드, ConfigMap, Secret, PVC 등
+  - 네임스페이스, Pod, 서비스, 이벤트, 노드, ConfigMap, Secret, PVC 등
 - 명명된 그룹(Named Groups)
   - 기능별로 구분, 신규 기능도 여기에 포함
   - eg:
@@ -417,3 +417,114 @@ kubectl auth can-i get configmaps --as dev-user
 kubectl auth can-i create pods --as dev-user --namespace test
 ```
 
+## Cluster Roles
+### Role과 RoleBinding
+- 네임스페이스 범위에서 동작하며, 특정 네임스페이스 내 리소스 접근 권한을 부여.
+- 네임스페이스를 지정하지 않으면 default 네임스페이스에 생성됨.
+- 네임스페이스 범위 리소스 예: Pod, ReplicaSet, Deployment, Service, Secret 등.
+
+### 클러스터 범위 리소스
+- 네임스페이스에 속하지 않는 리소스.
+- 예시: Node, PersistentVolume, 인증서 서명 요청(CSR), Namespace 자체 등.
+- 생성 시 네임스페이스를 지정할 수 없음.
+
+### ClusterRole과 ClusterRoleBinding
+- 역할/역할 바인딩과 구조는 같지만, 클러스터 범위 리소스에 대한 권한을 다룸.
+- 예시
+  - 클러스터 관리자 역할: Node를 조회/생성/삭제.
+  - 스토리지 관리자 역할: PV와 PVC 생성.
+- 클러스터 역할 바인딩을 통해 사용자/그룹을 해당 ClusterRole과 연결.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-reader
+rules:
+  - apiGroups: [""]  # "" → core API 그룹
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: read-pods-global
+subjects:
+  - kind: User
+    name: ramos               # 권한을 줄 사용자
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: pod-reader           # 위에서 만든 ClusterRole 이름
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### 특징
+- ClusterRole은 클러스터 범위뿐 아니라 네임스페이스 리소스에도 적용 가능.
+  - 이렇게 하면 클러스터 전체 네임스페이스의 해당 리소스 접근 권한 부여 가능.
+- 예시: ClusterRole로 “Pod 읽기” 권한 부여 시 → 모든 네임스페이스의 Pod 접근 가능.
+- Kubernetes 설치 시 기본적으로 여러 ClusterRole이 생성됨.
+
+### 명령어 참고
+- `kubectl api-resources --namespaced=true` → 네임스페이스 리소스 목록.
+- `kubectl api-resources --namespaced=false` → 클러스터 범위 리소스 목록.
+
+## Service Accounts
+### Service Account 개념
+- 쿠버네티스 계정 종류
+  - 사용자 계정(User Account): 사람이 사용(관리자, 개발자 등)
+  - 서비스 계정(Service Account): 애플리케이션·자동화 도구 등 기계가 사용
+- 예시: Prometheus, Jenkins, 사용자 정의 대시보드 앱 등이 K8s API 호출 시 사용.
+
+### Service Account 동작 방식
+- Service Account 생성 시 자동으로 **토큰(Secret 객체)** 이 함께 생성되어 API 인증에 사용됨.
+- 쿠버네티스 내부에 배포된 애플리케이션은 토큰을 **Pod 내 볼륨(`/var/run/secrets/kubernetes.io/serviceaccount`)** 에 자동 마운트하여 사용.
+- 기본 Service Account(default): 모든 네임스페이스에 존재하며, Pod 생성 시 자동 연결.
+- 기본 Service Account은 제한된 권한만 가짐.
+- Pod에 다른 Service Account을 사용하려면 serviceAccountName 필드로 지정.
+- 기존 Pod의 Service Account은 변경 불가 → 재생성 필요.
+(Deployment는 롤아웃으로 변경 가능)
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-sa
+  namespace: default
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dashboard-pod
+spec:
+  serviceAccountName: dashboard-sa
+  containers:
+    - name: dashboard
+      image: my-dashboard:latest
+```
+
+### Service Account 토큰 변경 사항 (K8s 1.22 / 1.24)
+기존(1.22 이전)
+- Service Account 생성 시 만료 없는 토큰을 가진 Secret이 자동 생성.
+- Pod에 자동 마운트됨.
+- 확장성·보안 문제
+  - 유효 기간 없음 → 장기 노출 위험.
+  - Service Account마다 Secret 개별 생성 → 관리 부담.
+
+변경(1.22~)
+- TokenRequest API 도입 (KEP-1205)
+  - 토큰에 Audience 바인딩·유효 기간 포함.
+  - Projection Volume을 통해 Pod에 마운트.
+- Secret 자동 생성 대신 필요 시 명시적으로 토큰 요청.
+
+변경(1.24~)
+- Service Account 생성 시 자동으로 Secret/토큰 생성하지 않음.
+- 토큰 필요 시
+  - `kubectl create token <service-account>` 명령 사용.
+  - 기본 유효기간: 1시간 (옵션으로 연장 가능).
+- 여전히 만료 없는 토큰 Secret 생성 가능하나 권장하지 않음 (`kubernetes.io/service-account-token` 타입, `metadata.annotations`로 SA 연결).
+
+### 보안 권장 사항
+- 가능한 유효기간이 있는 토큰(TokenRequest API) 사용.
+- 만료 없는 토큰은 API 사용 불가·특별 필요 시에만 생성.
+- Service Account 토큰 Secret 생성은 최소화하여 보안 노출 방지.
