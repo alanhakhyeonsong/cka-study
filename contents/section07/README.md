@@ -167,3 +167,101 @@
 - kube-apiserver, etcd, kubelet 등 구성 요소 실행 시 관련 옵션(--tls-cert-file, --tls-private-key-file, --client-ca-file)에 지정
 - 사용자·노드 권한 부여는 CSR 생성 시 CN/OU 필드로 결정
 - 보통 kubeconfig에 통합 관리
+
+## View Certificate Details
+### 인증서 확인 목적
+- 새로 구성된 운영팀에서 인증서 관련 문제를 점검하기 위해 클러스터 전체 인증서 상태를 확인
+- 만료, 발급자, 이름·대체이름, 조직 정보 등이 올바른지 확인 필요
+
+### 환경 구성 이해
+- 클러스터 배포 방식에 따라 인증서 관리 방식이 다름
+  - 직접 설치한 경우: 관리자가 인증서 생성·배포
+  - kubeadm 사용 시: 인증서와 구성 요소들이 Pod 형태로 자동 배포
+- 점검 전, 어떤 도구와 배포 방식을 사용했는지 파악 필수
+
+### 인증서 파일 위치와 정보 수집
+1. kubeadm 환경
+- `/etc/kubernetes/manifests` 폴더의 kube-apiserver 정의 파일에서 사용되는 인증서 파일 경로 확인
+- 각 인증서 파일을 목록화하여 스프레드시트로 정리
+2. 세부 정보 확인
+- `openssl x509` 명령으로 인증서 디코딩
+- 확인 항목
+  - CN(이름) 및 Subject Alternative Name(SAN)
+  - 유효 기간(만료일)
+  - 발급자(CA)
+  - 조직 정보
+3. CA 발급자 확인
+- kubeadm 기본 CA는 kubernetes-ca
+
+### 점검 시 유의사항
+- 모든 인증서에 대해 이름·SAN이 정확한지, 올바른 조직에 속하는지, 올바른 CA로 서명됐는지, 만료되지 않았는지 확인
+- 세부 요구 사항은 쿠버네티스 공식 문서 참고
+
+### 문제 발생 시 로그 확인
+- 직접 설치한 경우: OS 서비스 로그 확인
+- kubeadm 환경
+  - `kubectl logs <pod>` 명령으로 구성 요소 Pod 로그 확인
+  - 핵심 구성 요소(API 서버, etcd 등)가 다운돼 kubectl 사용 불가하면 Docker 명령(`docker ps -a, docker logs <container-id>`)로 확인
+
+## Certificate API
+### 기존 수동 방식
+- 클러스터 관리자가 CA(루트 인증서 + 개인키)를 소유하고 직접 서명 처리
+- 새 관리자가 접근 필요 시
+  1. 새 관리자가 개인키 + CSR 생성
+  2. 기존 관리자가 CA 서버에서 서명 후 인증서 반환
+- 인증서 만료 시 동일 절차 반복
+- CA 키·인증서는 안전한 서버에 보관해야 하며, 접근 권한이 있는 사람은 원하는 대로 사용자 생성 가능 → 보안 중요
+
+### 자동화 필요성
+- 사용자 수 증가·팀 규모 확장 시 수동 처리 비효율
+- 인증서 갱신(회전)도 자동화 필요
+- 쿠버네티스에는 이를 위한 내장 인증서 API가 있음
+
+### 쿠버네티스 인증서 API 활용
+- CertificateSigningRequest(CSR) 리소스 생성
+  - 매니페스트 파일 작성 → `spec.request` 필드에 Base64 인코딩된 CSR 넣기
+- CSR 생성 후 kubectl get csr로 요청 목록 확인
+- 관리자가 `kubectl certificate approve <csr-name>`으로 승인
+- 승인 후 CSR 객체에 서명된 인증서(Base64)가 포함됨 → 디코딩 후 사용자에게 전달
+- 이로써 API 서버 접속 가능
+
+### 인증서 API 처리 흐름
+1. 사용자: 개인키·CSR 생성
+2. 관리자: CSR 매니페스트 작성 및 쿠버네티스에 제출
+3. 관리자는 CSR 승인
+4. 서명된 인증서 Base64 → 디코딩 → 사용자 배포
+
+### 인증서 API 백엔드 동작
+- 컨트롤 플레인에서 **kube-controller-manager**가 담당
+- 내부에 CSR-Approving, CSR-Signing 컨트롤러가 있음
+- CSR 승인·서명에는 CA 루트 인증서와 개인키 필요
+
+## KubeConfig
+### kubeconfig 사용 이유
+- 매번 kubectl 명령에 서버 주소, 클라이언트 인증서, 키, CA 인증서를 옵션으로 지정하는 것은 번거로움
+- 이 정보를 `kubeconfig` 파일에 저장하면 명령에서 자동으로 참조 가능
+- 기본 경로: 사용자 홈 디렉터리 `~/.kube/config`
+- 기본 파일을 삭제하면 명시적으로 `--kubeconfig` 옵션으로 경로 지정 필요
+
+### kubeconfig 파일 구조
+- 형식: YAML, `apiVersion: v1`, `kind: Config`
+- 세 가지 섹션
+  1. clusters – 접근할 쿠버네티스 클러스터 정보 (서버 주소, CA 인증서 등)
+  2. users – 해당 클러스터에 접근할 사용자 정보 (클라이언트 인증서/키 경로 등)
+  3. contexts – 어떤 사용자가 어떤 클러스터에 접근할지 연결 정의 (옵션: namespace 지정 가능)
+- 각 섹션은 배열 형태 → 여러 클러스터, 사용자, 컨텍스트를 한 파일에 정의 가능
+
+### 컨텍스트 활용
+- 컨텍스트 = 클러스터 + 사용자 + (옵션) 네임스페이스
+- 현재 컨텍스트 설정: `kubectl config use-context <context-name>`
+- 현재 컨텍스트는 kubeconfig의 `current-context` 필드에 저장
+- `kubectl config view` 로 현재 구성 내용 확인 가능
+
+### 인증서 지정 방법
+- 일반적으로 파일 경로로 지정 (`certificate-authority`, `client-certificate`, `client-key`)
+- 대안: 인증서 내용을 Base64 인코딩해 *-data 필드에 직접 포함 (`certificate-authority-data`, `client-certificate-data` 등)
+- Base64로 인코딩된 인증서 데이터를 파일로 복원하려면 디코딩 수행
+
+### 네임스페이스 설정
+- 컨텍스트에 `namespace` 필드를 지정하면 해당 컨텍스트 사용 시 자동으로 특정 네임스페이스로 접속
+- 여러 환경(개발/운영) 또는 여러 사용자 권한 전환 시 유용
