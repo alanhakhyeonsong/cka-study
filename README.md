@@ -1,7 +1,7 @@
 # cka-study
 
 - [Certified Kubernetes Administrator (CKA) with Practice Tests | Udemy](https://www.udemy.com/course/certified-kubernetes-administrator-with-practice-tests/) 강의 학습 후 개인적으로 정리.
-- 2025년 개정 가이드라인 : https://github.com/cncf/curriculum/blob/master/CKA_Curriculum_v1.32.pdf
+- 2025년 개정 가이드라인 : https://github.com/cncf/curriculum/blob/master/CKA_Curriculum_v1.33.pdf
 
 ## Contents
 - Core Concepts
