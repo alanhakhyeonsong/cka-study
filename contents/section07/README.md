@@ -265,3 +265,155 @@
 ### 네임스페이스 설정
 - 컨텍스트에 `namespace` 필드를 지정하면 해당 컨텍스트 사용 시 자동으로 특정 네임스페이스로 접속
 - 여러 환경(개발/운영) 또는 여러 사용자 권한 전환 시 유용
+
+## API Groups
+### 쿠버네티스 API 개념
+- Kube API Server는 클러스터와 상호작용하는 중심 컴포넌트
+- `kubectl`이나 REST API를 통해 모든 작업이 API 서버로 전달됨
+- 기본 포트: 6443
+- eg: `/api/v1/pods` → 포드 목록 조회
+
+### API 그룹 구조
+- 핵심(Core) 그룹
+  - 네임스페이스, 포드, 서비스, 이벤트, 노드, ConfigMap, Secret, PVC 등
+- 명명된 그룹(Named Groups)
+  - 기능별로 구분, 신규 기능도 여기에 포함
+  - eg:
+    - `apps` → Deployment, ReplicaSet, StatefulSet
+    - `networking.k8s.io` → NetworkPolicy
+    - `certificates.k8s.io` → CertificateSigningRequest
+    - `authentication.k8s.io`, `authorization.k8s.io` 등
+- 각 그룹 안에는 리소스(Resource) 들이 있으며, 리소스별로 수행 가능한 **동사(verbs)**가 있음
+  - eg: `list`, `get`, `create`, `delete`, `update`, `watch` 등
+
+<img width="1267" height="638" alt="Image" src="https://github.com/user-attachments/assets/7a6c4bc3-cb6c-48d3-b84e-0ac77083a1d5" />
+
+### API 그룹 확인 방법
+- API 서버 루트(`https://<API_SERVER>:6443/`)에 접근 시 지원 API 그룹 목록 확인 가능
+- Named API Group 내부의 모든 리소스 목록도 반환 가능
+
+### API 접근 방식
+- 직접 curl로 접근 시 인증 메커니즘 필요 (인증서 파일 전달)
+- 또는 kubectl proxy 사용
+  - 로컬 포트 8001에서 프록시 서비스 실행
+  - kubeconfig의 인증서와 자격 증명 사용
+  - 명령줄에서 인증서 경로를 매번 지정할 필요 없음
+
+### 용어 구분
+- kube-proxy: 클러스터 내부에서 서비스와 파드 간 네트워크 트래픽을 처리하는 네트워크 프록시
+- kubectl proxy: API 서버에 안전하게 접근하기 위해 로컬에서 HTTP 프록시를 띄워주는 명령
+
+### 참고
+- 쿠버네티스의 모든 리소스는 API 그룹·리소스·동사로 정의됨
+- 이후 **권한 부여(Authorization)** 에서 이 구조를 기반으로 접근 허용/거부를 제어하게 됨
+
+## Authorization
+### 권한 부여의 필요성
+- 인증(Authentication)으로 누가 접근할 수 있는지는 정해졌지만, 무엇을 할 수 있는지는 권한 부여로 결정됨
+- 모든 사용자·서비스가 동일한 권한을 가져서는 안 됨
+  - 예: 개발자는 앱 배포는 가능하지만 클러스터 네트워크/스토리지 설정 변경은 불가
+  - 서비스 계정은 필요한 최소 권한만 부여
+
+### 네임스페이스와 접근 제어
+- 여러 팀/조직이 같은 클러스터를 공유할 경우 네임스페이스로 리소스를 분리
+- 권한 부여 정책은 특정 네임스페이스에 대해서만 접근 허용/거부 가능
+
+### 쿠버네티스 권한 부여 메커니즘
+1. Node Authorizer
+  - kubelet이 API 서버와 통신할 수 있도록 노드 요청 승인
+  - 노드 이름은 `system:node:<노드명>`, 그룹은 `system:nodes`
+2. ABAC(Attribute-Based Access Control)
+  - 사용자/그룹과 권한을 직접 연결하는 정책 파일 작성
+  - 정책 변경 시 파일 수정 후 API 서버 재시작 필요 → 관리 불편
+3. RBAC(Role-Based Access Control)
+  - 권한 집합을 역할(Role)로 정의하고 사용자/그룹을 역할에 매핑
+  - 권한 변경 시 역할만 수정하면 일괄 반영 → 관리 효율적
+4. Webhook Authorizer
+  - 외부 시스템(예: Open Policy Agent)에 권한 판단 위임
+  - API 서버가 사용자 정보와 요청 세부 정보를 외부로 전달, 결과에 따라 승인/거부
+5. AlwaysAllow / AlwaysDeny
+  - 모든 요청을 무조건 허용 또는 거부 (주로 테스트용)
+
+ABAC 예시는 아래와 같음
+
+<img width="1662" height="884" alt="Image" src="https://github.com/user-attachments/assets/c7b1ada4-5664-4406-b480-b2ebf8bd756d" />
+
+RBAC 예시는 아래와 같음
+
+<img width="1848" height="1018" alt="Image" src="https://github.com/user-attachments/assets/7ac89f51-34d9-44d7-9a84-243d83f88fbc" />
+
+### 권한 부여 모드 설정
+- API 서버 실행 시 `--authorization-mode` 옵션으로 설정
+- 쉼표로 구분해 여러 모드 지정 가능
+  - 예: `--authorization-mode=Node,RBAC,Webhook`
+- 요청 처리 순서: 모드별로 순차 검사, 하나라도 승인하면 즉시 허용, 전부 거부 시 최종 거부
+
+## Role Based Access Control (RBAC)
+### RBAC 개념
+- Role: 네임스페이스 단위에서 리소스에 대한 권한 집합을 정의
+- RoleBinding: 특정 사용자/그룹을 Role과 연결해 권한을 부여
+- 네임스페이스 범위에서만 권한이 적용됨 (클러스터 전역 권한은 ClusterRole/ClusterRoleBinding 사용)
+
+### Role 생성
+- API 버전: `rbac.authorization.k8s.io/v1`
+- rules 항목: API 그룹, 리소스, 행동(verbs) 으로 구성
+- 여러 규칙을 한 Role 안에 정의 가능
+- 예: 개발자가 pods와 configmaps에 대해 `list`, `get`, `create`, `delete` 가능
+
+### RoleBinding 생성
+- 사용자(또는 그룹)를 Role에 연결
+- `subjects`: 사용자 정보 지정
+- `roleRef`: 연결할 Role 정보 지정
+- Role과 RoleBinding은 동일 네임스페이스에서만 연동
+
+### 권한 확인
+- `kubectl auth can-i <verb> <resource>` 명령으로 확인 가능
+- `--as <user>` 옵션으로 특정 사용자의 권한을 시뮬레이션 가능
+- 리소스 이름 단위(resourceNames)로 세부 접근 제어 가능
+
+### RBAC 예시
+
+```yaml
+# developer-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "get", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["list", "get", "create", "delete"]
+---
+# developer-rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developer-binding
+  namespace: default
+subjects:
+  - kind: User
+    name: dev-user        # 사용자 이름
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: developer
+  apiGroup: rbac.authorization.k8s.io
+```
+
+권한 테스트 예시는 아래와 같음.
+
+```bash
+# 현재 계정이 pods를 생성할 수 있는지 확인
+kubectl auth can-i create pods
+
+# 특정 사용자(dev-user)가 configmaps를 조회할 수 있는지 확인
+kubectl auth can-i get configmaps --as dev-user
+
+# 특정 네임스페이스에서 테스트
+kubectl auth can-i create pods --as dev-user --namespace test
+```
+
