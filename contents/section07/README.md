@@ -528,3 +528,215 @@ spec:
 - 가능한 유효기간이 있는 토큰(TokenRequest API) 사용.
 - 만료 없는 토큰은 API 사용 불가·특별 필요 시에만 생성.
 - Service Account 토큰 Secret 생성은 최소화하여 보안 노출 방지.
+
+## Image Security
+### 이미지와 이름 규칙
+- Kubernetes에서 Pod 배포 시 nginx 같은 이미지를 사용.
+- 이미지 이름은 Docker의 네이밍 규칙을 따름.
+  - 예: nginx → 실제로는 library/nginx.
+  - library는 Docker Hub 공식 이미지 기본 계정.
+  - 개인/회사 계정을 만들면 계정명/이미지명 형태 사용.
+
+### 이미지 저장소(Registry)
+- 이미지가 저장되는 곳은 레지스트리.
+- 기본값: Docker Hub (docker.io).
+- 그 외
+  - GCR (gcr.io) – Google Container Registry
+  - AWS ECR, Azure ACR, GCP Artifact Registry 등 클라우드 제공자별 레지스트리.
+- 공개/비공개 모두 가능.
+  - 사내 전용 앱은 프라이빗 레지스트리 사용 권장.
+
+### 개인 레지스트리 접근
+- 비공개 이미지를 사용하려면 로그인 필요.
+- docker login 명령으로 사용자명/비밀번호 인증.
+- Kubernetes에서 사용할 때는 자격 증명을 Secret으로 저장.
+
+### Kubernetes에서 인증 처리
+- Kubernetes는 Pod 실행 시 워커 노드의 Docker 런타임이 이미지를 가져옴.
+
+```bash
+kubectl create secret docker-registry regcred \
+  --docker-server=myregistry.example.com \
+  --docker-username=myuser \
+  --docker-password=mypassword \
+  --docker-email=myuser@example.com
+
+```
+- 개인 레지스트리 접근 자격 증명을 **Secret 객체**로 생성.
+  - 유형: docker-registry
+  - 필드: 레지스트리 서버 주소, 사용자명, 비밀번호, 이메일.
+  - 자주 쓰이는 Secret명으로 `regcred`가 있음.
+  - 이렇게 하면 dockerconfigjson 형식으로 인코딩된 인증정보가 Secret 리소스로 저장됨.
+
+```bash
+kubectl get secret regcred --output=yaml
+```
+- 출력 시 `data[".dockerconfigjson"]` 항목에 base64 인코딩된 인증정보가 들어있음.
+- Pod 정의 파일에 imagePullSecrets 항목으로 Secret을 참조.
+- Pod가 실행될 때 Kubelet이 Secret을 이용해 레지스트리에서 이미지를 가져옴.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: private-reg-pod
+spec:
+  containers:
+  - name: private-app
+    image: myregistry.example.com/myuser/myapp:1.0
+  imagePullSecrets:
+  - name: regcred
+```
+
+- 매번 Pod마다 `imagePullSecrets`를 작성하기 번거롭다면 ServiceAccount에 설정해 네임스페이스 단위로 기본 적용 가능.
+
+```bash
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "regcred"}]}'
+```
+
+## Security Context
+### 보안 컨텍스트 개념
+- Docker 컨테이너 실행 시 보안 표준을 정의할 수 있음  
+  → 예: 실행 사용자 ID, Linux capabilities(추가/제거 가능한 권한)
+- Kubernetes에서도 동일하게 보안 컨텍스트(Security Context) 를 설정할 수 있음
+
+### 적용 범위
+- Pod 레벨
+  - `spec.securityContext` 로 정의
+  - Pod 안 모든 컨테이너에 적용됨
+- Container 레벨
+  - `spec.containers[].securityContext` 로 정의
+  - 개별 컨테이너에 적용됨
+- 우선순위
+  - Pod + Container 둘 다 설정된 경우, Container 설정이 Pod 설정을 무효화함
+
+### 예시
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-pod
+spec:
+  containers:
+    - name: ubuntu
+      image: ubuntu
+      command: ["sleep", "3600"]
+      securityContext:
+        runAsUser: 1000
+        capabilities:
+          add: ["MAC_ADMIN"]
+```
+
+- Pod 정의 파일에서 `securityContext` 필드 추가
+  - Pod 수준: `runAsUser` 로 사용자 ID 지정
+  - Container 수준: `capabilities` 옵션을 사용해 Linux 기능 추가/삭제
+
+### 정리
+- 보안 컨텍스트는 Pod/Container의 실행 환경 권한을 제어하는 기능
+- 사용자 ID, 그룹 ID, Linux Capabilities 등 세부 실행 권한을 제한하거나 확장 가능
+- 보안을 강화하고 최소 권한 실행(Least Privilege)을 실현하는데 중요한 요소
+
+## Network Policy
+### 네트워킹 기본 흐름
+- 웹 앱 → API 서버 → DB 서버의 단순 아키텍처 예시.
+- 기본 트래픽 종류
+  - Ingress : 외부에서 들어오는 트래픽
+  - Egress : 외부로 나가는 트래픽
+- 기본적으로 Kubernetes는 모든 Pod 간 통신을 허용함.
+
+### 보안 요구사항
+- 예: 웹 서버가 DB 서버에 직접 접근하지 못하게 하고, 오직 API 서버만 DB 서버에 접근하도록 제한 필요.
+- 이런 경우 NetworkPolicy 리소스를 사용.
+
+### 네트워크 정책 개념
+- 네임스페이스 안의 오브젝트로, Pod/ReplicaSet/Service와 비슷하게 동작.
+- 특정 Pod에 레이블을 붙이고, NetworkPolicy에서 **PodSelector**로 해당 Pod 지정.
+- 정책이 적용되면
+  - 기본적으로 해당 Pod는 **모든 트래픽이 차단**됨.
+  - 정책에 정의된 규칙과 일치하는 트래픽만 허용.
+
+### 규칙 구성
+- policyTypes: Ingress, Egress, 혹은 둘 다 지정.
+- Ingress 규칙 예시 (DB Pod)
+  - 특정 레이블(API Pod)에서 오는 트래픽만 허용.
+  - 포트 3306 (MySQL)만 허용.
+- 주의: Ingress만 정의하면 Egress는 막히지 않음.  
+→ Egress 제한을 원한다면 반드시 `policyTypes`에 Egress 추가해야 함.
+
+### 적용 예시
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-policy
+spec:
+  podSelector:
+    matchLabels:
+      role: db
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          role: api
+    ports:
+    - protocol: TCP
+      port: 3306
+```
+- `role=db` 라벨이 붙은 Pod에 정책 적용.
+- `role=api` Pod만 3306 포트로 접근 가능.
+
+### 지원 여부
+- 모든 CNI 플러그인이 NetworkPolicy를 지원하지는 않음.
+- 지원하는 예: Calico, Cilium(강의에서 Calico/WeaveNet 등 언급됨)
+- 지원하지 않는 경우(예: Flannel), 정책을 정의해도 실제로는 적용되지 않음.
+
+## Custom Resource Definition (CRD)
+### 리소스와 컨트롤러 개념
+- 리소스(Resource): 예를 들어 Deployment 객체를 생성하면 etcd에 저장됨.
+- 컨트롤러(Controller): 배포 컨트롤러가 etcd의 상태를 감시하고, 지정된 복제본 수만큼 파드를 생성/유지.
+- 컨트롤러는 Kubernetes에 내장된 프로세스로 Go로 작성되어 있으며, 리소스의 원하는 상태를 실제 상태와 동기화함.
+
+### 사용자 정의 리소스 (Custom Resource)
+- Kubernetes 기본 리소스 외에도, 사용자가 임의의 객체(예: FlightTicket)를 정의할 수 있음.
+
+```yaml
+apiVersion: flights.com/v1
+kind: FlightTicket
+metadata:
+  name: my-flight
+spec:
+  from: mumbai
+  to: london
+  tickets: 2
+```
+- 이렇게 만들면 etcd에 저장되지만, 실제 항공권 예약 API 호출은 일어나지 않음.
+
+### 사용자 정의 컨트롤러 (Custom Controller)
+- 특정 리소스 생성/삭제를 감시하고, 외부 API 호출이나 동작을 수행하는 코드.
+- 예: FlightTicket 리소스가 생성되면 항공권 예약 API를 호출, 삭제되면 취소 API 호출.
+- 기본 리소스의 Deployment Controller처럼 동작하지만, 사용자가 직접 작성해야 함.
+
+### CRD (Custom Resource Definition)
+- Kubernetes에 새로운 리소스 유형을 등록하는 방법.
+- CRD 정의 예시
+  - apiVersion: apiextensions.k8s.io/v1
+  - kind: CustomResourceDefinition
+  - metadata.name: flighttickets.flights.com
+  - scope: Namespaced / Cluster
+  - group: flights.com
+  - names: kind(FlightTicket), singular(flightticket), plural(flighttickets), shortNames(ft)
+  - versions: 여러 버전(v1alpha1, v1, …) 정의 가능, 스토리지 버전 지정 필요
+  - schema: OpenAPI v3 스키마 기반으로 spec 필드의 구조/타입/검증 조건 정의 (예: from: string, to: string, tickets: integer)
+
+### CRD의 역할
+- CRD를 적용하면 `kubectl get flighttickets`, `kubectl create -f flightticket.yaml` 같은 명령 가능.
+- 단, 이 상태에서는 etcd에 객체가 저장될 뿐 아무 동작도 하지 않음.
+- 실제 동작을 위해서는 반드시 Custom Controller 가 필요.
+
+### 정리
+- CRD는 Kubernetes에 새로운 리소스 타입을 정의하고 유효성 검증 스키마까지 지정할 수 있는 도구.
+- 하지만 CRD만으로는 단순히 etcd에 데이터만 저장될 뿐이며, 실제 동작을 위해서는 Custom Controller 가 필요.
+- 즉, CRD = 새로운 리소스 정의, Custom Controller = 그 리소스에 반응하여 동작 수행.
