@@ -12,10 +12,10 @@
 
 ### 배포 전략(Deployment Strategy)
 1. Recreate
-- 기존 파드를 모두 종료한 뒤 새 버전 파드 일괄 생성
+- 기존 Pod를 모두 종료한 뒤 새 버전 Pod 일괄 생성
 - 다운타임 발생
 2. RollingUpdate (기본 전략)
-- 구 버전 파드를 점진적으로 축소(terminate)하면서 새 버전 파드를 순차 생성
+- 구 버전 Pod를 점진적으로 축소(terminate)하면서 새 버전 Pod를 순차 생성
 - 무중단(up-and-running) 상태로 버전 전환 가능
 
 ### deployment 업데이트 방법
@@ -326,11 +326,11 @@ volumes:
 - 대규모 모놀리식을 작은 마이크로서비스로 분리 → 독립적 개발·배포 가능.
 - 필요 시 개별 서비스만 수정/확장 가능.
 
-### 멀티 컨테이너 파드의 필요성
+### 멀티 컨테이너 Pod의 필요성
 - 경우에 따라 두 서비스가 항상 함께 동작해야 함 (예: 웹 서버 + 메인 앱).
 - 서비스 코드를 병합하지 않고도 같은 생명주기를 공유하도록 구성.
 
-### 멀티 컨테이너 파드 특징
+### 멀티 컨테이너 Pod 특징
 - 동일한 라이프사이클 공유 (함께 생성/종료).
 - 네트워크 공간 공유 → localhost 로 서로 통신 가능.
 - 스토리지 볼륨 공유 가능.
@@ -373,7 +373,7 @@ spec:
     emptyDir: {}
 ```
 
-멀티 컨테이너 파드는 서로 밀접하게 연관된 서비스(웹 서버 + 앱 등)를 같은 Pod에 배치해 동일한 네트워크·스토리지·라이프사이클을 공유하도록 하는 방법이다.
+멀티 컨테이너 Pod는 서로 밀접하게 연관된 서비스(웹 서버 + 앱 등)를 같은 Pod에 배치해 동일한 네트워크·스토리지·라이프사이클을 공유하도록 하는 방법이다.
 
 ## Multi Container Pods Design Patterns
 ### 공동 배치된 컨테이너 (Co-located Containers)
@@ -405,10 +405,10 @@ spec:
 - 사이드카 컨테이너: 본 앱 실행 전 시작 → 앱과 함께 계속 실행 → 앱 종료 시까지 동작.
 
 ## Init Containers
-### 멀티 컨테이너 파드의 일반적인 동작
-- 파드 안의 각 컨테이너는 파드 생명주기와 함께 계속 살아 있어야 함.
+### 멀티 컨테이너 Pod의 일반적인 동작
+- Pod 안의 각 컨테이너는 Pod 생명주기와 함께 계속 살아 있어야 함.
 - 예: 웹 애플리케이션 컨테이너 + 로그 수집 에이전트 컨테이너 → 둘 다 항상 실행 상태 유지.
-- 둘 중 하나라도 실패하면 파드 전체가 재시작됨.
+- 둘 중 하나라도 실패하면 Pod 전체가 재시작됨.
 
 ### 일회성 작업이 필요한 경우
 - 가끔은 컨테이너가 한 번만 실행되고 종료되기를 원할 수 있음.
@@ -420,9 +420,9 @@ spec:
 - 이런 경우 Init Container 사용.
 - 일반 컨테이너와 비슷하게 정의하지만, Pod의 spec.initContainers 항목에 선언.
 - 특징
-  - 파드가 시작될 때 먼저 실행되며, 반드시 완료(성공)해야 본 컨테이너들이 실행됨.
+  - Pod가 시작될 때 먼저 실행되며, 반드시 완료(성공)해야 본 컨테이너들이 실행됨.
   - 여러 개를 정의하면 순차적으로 실행됨.
-  - 하나라도 실패하면 Kubernetes가 파드를 반복해서 재시작 → 성공할 때까지 시도.
+  - 하나라도 실패하면 Kubernetes가 Pod를 반복해서 재시작 → 성공할 때까지 시도.
 
 ### 예시
 - 코드 클론을 먼저 실행하는 Init Container
@@ -447,3 +447,151 @@ initContainers:
 ```
 
 ## Introduction to Autoscaling
+### 스케일링 기본 개념
+- 수직 확장(Vertical Scaling): 기존 서버/노드에 CPU·메모리 같은 리소스를 더 추가하는 방식.
+- 수평 확장(Horizontal Scaling): 서버나 인스턴스를 추가해서 부하를 분산하는 방식.
+
+### Kubernetes에서의 스케일링
+- 클러스터 스케일링
+  - 수평 확장: 노드를 더 추가.
+  - 수직 확장: 기존 노드의 리소스를 늘림 (비교적 드문 방식).
+- 워크로드 스케일링
+  - 수평 확장: 더 많은 Pod를 생성.
+  - 수직 확장: Pod에 할당된 리소스를 늘림.
+
+### 스케일링 방식
+- 수동 스케일링
+  - 클러스터: 새 노드 프로비저닝 후 `kubeadm join` 으로 클러스터에 추가.
+  - 워크로드: `kubectl scale` 로 Pod 개수 조정.
+  - Pod 리소스: `kubectl edit` 로 리소스 요청/제한 변경.
+- 자동 스케일링
+  - Cluster Autoscaler: 인프라(노드)를 자동으로 확장/축소.
+  - Horizontal Pod Autoscaler (HPA): Pod 개수를 자동으로 조절.
+  - Vertical Pod Autoscaler (VPA): Pod 리소스 요청/제한을 자동으로 조절.
+
+## Horizontal Pod Autoscaler (HPA)
+### 수동 확장
+- `kubectl top pod` 로 리소스 사용량(CPU/메모리) 확인. (→ Metrics Server 필요)
+- 특정 임계값(예: CPU 450m)에 도달하면 `kubectl scale` 명령어로 Pod 수를 늘림.
+- 문제점: 관리자가 직접 모니터링해야 하고, 급격한 트래픽 변화에 빠르게 대응 불가.
+
+### 자동 확장(HPA)
+- HPA는 메트릭 서버를 통해 Pod 리소스 사용량을 지속적으로 모니터링.
+- CPU/메모리 또는 사용자 정의 메트릭 기준으로 자동으로 Pod 수를 조절.
+- 사용량이 증가 → Pod 추가
+- 사용량이 감소 → Pod 축소
+- 최소/최대 Pod 개수 범위를 유지하면서 확장/축소 수행.
+
+### HPA 생성 방법
+- 명령형 방식
+
+```bash
+kubectl autoscale deployment my-app \
+  --min=1 --max=10 \
+  --cpu-percent=50
+```
+→ CPU 사용률이 50% 넘으면 스케일 아웃.
+
+- 선언형 방식
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-app-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+```
+
+### HPA 동작 확인
+- `kubectl get hpa` 로 확인 가능:
+  - 현재 CPU 사용량
+  - 목표 사용률
+  - 최소/최대 Pod 수
+  - 현재 복제본 수
+- 필요 없으면 `kubectl delete hpa` 로 삭제 가능.
+
+### 확장 메트릭 소스
+- 기본: Metrics Server (CPU, 메모리 사용량)
+- 사용자 정의 메트릭 어댑터: 클러스터 내부 앱에서 제공하는 지표
+- 외부 메트릭 어댑터: Datadog, Dynatrace 등 외부 모니터링 도구
+
+HPA는 Pod의 CPU/메모리 사용량을 기준으로 자동 확장을 담당하며, **시험에서는 Metrics Server + HPA YAML 정의 정도를 이해**하는 게 핵심
+
+## In-place Resize of Pods
+### 기존 동작
+- Kubernetes v1.32 기준
+  - Pod 리소스 요청/제한(CPU, 메모리 등)을 변경하면 기존 Pod를 종료하고 새 Pod를 생성해야 함.
+  - 즉, 인플레이스 업데이트 불가.
+
+### 인플레이스 크기 조정 (In-Place Pod Vertical Scaling)
+- Kubernetes v1.27 알파 기능으로 도입 → 이후 v1.33 알파 확장됨.
+- InPlacePodVerticalScaling FeatureGate 활성화 시 사용 가능.
+- 컨테이너를 종료하지 않고 CPU/메모리 리소스를 조정할 수 있음.
+  - 예: CPU 변경 시 재시작 불필요, 메모리 변경 시 재시작 필요하도록 정책 설정 가능.
+
+### 크기 조정 정책
+-	리소스별로 재시작 여부 지정 가능.
+  -	CPU → 재시작 없이 업데이트
+  -	메모리 → 재시작 필요
+
+### 제한 사항
+- 지원 범위: CPU, 메모리 리소스만 가능
+- 변경 불가 사항
+  - Pod QoS 클래스
+  - Init 컨테이너 및 Ephemeral 컨테이너
+- 메모리 관련 제약
+    - 메모리 제한은 사용량 이하로 줄일 수 없음
+  - 줄이려 할 경우 → 조건 충족 전까지 “Resizing in-progress” 상태 유지
+- Windows Pod는 현재 지원되지 않음
+
+## Vertical Pod Autoscaling (VPA)
+### 수동 수직 확장
+- 관리자가 `kubectl top pod`로 리소스 모니터링 후 `kubectl edit deployment`로 CPU/메모리 요청·제한 변경.
+- 기존 Pod 종료 → 새 Pod 생성.
+- 수동 관리 방식 → 비효율적.
+
+### VPA
+- HPA와 달리 쿠버네티스에 기본 내장되지 않음 → 별도 설치 필요.
+- 주요 컴포넌트
+  - 추천자(Recommender): CPU/메모리 사용량 분석 → 권장 리소스 값 산출.
+  - 업데이터(Updater): 최적치 벗어난 Pod 종료(퇴출).
+  - 어드미션 컨트롤러(Admission Controller): 새 Pod 생성 시 권장 리소스 적용.
+
+### 동작 방식
+1. 추천자가 메트릭 수집 → 권장 값 계산.
+2. 업데이터가 현재 Pod와 비교 → 필요 시 Pod 종료.
+3. 어드미션 컨트롤러가 새 Pod 기동 시 권장 값 반영.
+
+### 업데이트 정책 모드
+- Off: 권장만 제공, 실제 변경 없음.
+- Initial: 최초 생성 시만 권장 값 적용.
+- Recreate: 필요 시 Pod 종료 후 새로 생성.
+- Auto: 현재는 Recreate와 동일, 향후 In-Place 업데이트 지원 시 자동 적용 예정.
+
+### HPA vs VPA
+
+| **구분** | **HPA (수평 확장)** | **VPA (수직 확장)** |
+| --- | --- | --- |
+| 방식 | Pod 수 증감 | 개별 Pod 리소스 조정 |
+| Pod 동작 | 기존 Pod 유지 + 새 Pod 생성 → 무중단 | Pod 재시작 필요 → 다운타임 발생 |
+| 트래픽 폭증 대응 | 빠른 확장 가능 → 적합 | 대응 느림 |
+| 비용 최적화 | 유휴 Pod 제거 | 리소스 과할당 방지 |
+| 적합 워크로드 | 웹 서버, 마이크로서비스, API | DB, JVM 앱, AI/ML 등 CPU·메모리 집약형 |
+
+### 활용 시나리오
+- VPA 적합: 상태 저장 워크로드, DB, 초기화 시 CPU 많이 쓰는 애플리케이션.
+- HPA 적합: 변동 트래픽 많은 상태 비저장 서비스.
+- 두 가지를 병행할 수도 있음.
