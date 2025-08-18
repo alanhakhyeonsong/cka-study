@@ -320,3 +320,130 @@ volumes:
 - Secret: 민감정보 저장용 객체 (base64 인코딩)
 - Pod에서 환경 변수나 볼륨으로 주입 가능
 - 보안을 위해 RBAC, etcd 암호화, 외부 비밀 관리 솔루션을 반드시 고려해야 함
+
+## Multi Container Pods
+### 마이크로서비스와 모놀리식의 차이
+- 대규모 모놀리식을 작은 마이크로서비스로 분리 → 독립적 개발·배포 가능.
+- 필요 시 개별 서비스만 수정/확장 가능.
+
+### 멀티 컨테이너 파드의 필요성
+- 경우에 따라 두 서비스가 항상 함께 동작해야 함 (예: 웹 서버 + 메인 앱).
+- 서비스 코드를 병합하지 않고도 같은 생명주기를 공유하도록 구성.
+
+### 멀티 컨테이너 파드 특징
+- 동일한 라이프사이클 공유 (함께 생성/종료).
+- 네트워크 공간 공유 → localhost 로 서로 통신 가능.
+- 스토리지 볼륨 공유 가능.
+- Pod 간 별도 Service/Volume 없이 컨테이너끼리 직접 통신 가능.
+
+### 구현 방식
+- Pod 정의 파일의 `spec.containers` 는 배열 형태 → 여러 컨테이너 정의 가능.
+- 예시
+  - 컨테이너 1 → web-app
+  - 컨테이너 2 → main-app
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container-pod
+  labels:
+    app: demo-app
+spec:
+  containers:
+  - name: web-app
+    image: nginx:1.27
+    ports:
+    - containerPort: 80
+    volumeMounts:
+    - name: shared-data
+      mountPath: /usr/share/nginx/html
+  - name: main-app
+    image: busybox:latest
+    command: ["sh", "-c"]
+    args:
+    - |
+      echo "<h1>Hello from Main App</h1>" > /usr/share/nginx/html/index.html;
+      sleep 3600
+    volumeMounts:
+    - name: shared-data
+      mountPath: /usr/share/nginx/html
+  volumes:
+  - name: shared-data
+    emptyDir: {}
+```
+
+멀티 컨테이너 파드는 서로 밀접하게 연관된 서비스(웹 서버 + 앱 등)를 같은 Pod에 배치해 동일한 네트워크·스토리지·라이프사이클을 공유하도록 하는 방법이다.
+
+## Multi Container Pods Design Patterns
+### 공동 배치된 컨테이너 (Co-located Containers)
+- 가장 단순한 멀티 컨테이너 형태.
+- Pod의 `spec.containers` 배열에 여러 컨테이너 정의.
+- 특징
+  - 모든 컨테이너가 동시에 시작되고 종료됨.
+  - 시작 순서를 지정할 수 없음.
+  - 서로 종속적인 두 서비스가 항상 같이 실행되어야 할 때 사용.
+
+### 초기화 컨테이너 (Init Containers)
+- Pod가 시작될 때 **먼저 실행되는 준비용 컨테이너.**
+- 작업 완료 후 종료되며, 그 다음에 본 컨테이너(App 컨테이너)가 시작됨.
+- 여러 개 정의 가능 → **순차적으로 실행됨.**
+- 사용 예
+  - DB 준비가 될 때까지 대기
+  - 다른 API 서비스가 준비될 때까지 검사
+
+### 사이드카 컨테이너 (Sidecar Containers)
+- **Init Container처럼 먼저 실행되지만, 종료되지 않고 Pod 생명주기 동안 계속 실행됨.**
+- 메인 앱과 함께 실행되며, 앱이 중지된 후에도 종료 로그 등을 캡처 가능.
+- 사용 예
+  - 로그 수집기 (Filebeat) → Elasticsearch/Kibana로 로그 전달
+  - 메인 애플리케이션 실행 전/중/후 로그를 모두 수집 가능
+
+### 정리
+- 공동 배치된 컨테이너: 단순히 함께 실행, 시작 순서 없음.
+- 초기화 컨테이너: 본 앱 실행 전에 반드시 실행되어 종료되는 준비 작업.
+- 사이드카 컨테이너: 본 앱 실행 전 시작 → 앱과 함께 계속 실행 → 앱 종료 시까지 동작.
+
+## Init Containers
+### 멀티 컨테이너 파드의 일반적인 동작
+- 파드 안의 각 컨테이너는 파드 생명주기와 함께 계속 살아 있어야 함.
+- 예: 웹 애플리케이션 컨테이너 + 로그 수집 에이전트 컨테이너 → 둘 다 항상 실행 상태 유지.
+- 둘 중 하나라도 실패하면 파드 전체가 재시작됨.
+
+### 일회성 작업이 필요한 경우
+- 가끔은 컨테이너가 한 번만 실행되고 종료되기를 원할 수 있음.
+- 예시
+  - 애플리케이션 실행 전에 필요한 코드/바이너리를 외부 저장소에서 가져오는 작업
+  - 외부 서비스(DB, API 등)가 준비될 때까지 기다리는 작업
+
+### Init Container의 개념
+- 이런 경우 Init Container 사용.
+- 일반 컨테이너와 비슷하게 정의하지만, Pod의 spec.initContainers 항목에 선언.
+- 특징
+  - 파드가 시작될 때 먼저 실행되며, 반드시 완료(성공)해야 본 컨테이너들이 실행됨.
+  - 여러 개를 정의하면 순차적으로 실행됨.
+  - 하나라도 실패하면 Kubernetes가 파드를 반복해서 재시작 → 성공할 때까지 시도.
+
+### 예시
+- 코드 클론을 먼저 실행하는 Init Container
+
+```yaml
+initContainers:
+- name: init-myservice
+  image: busybox
+  command: ['sh', '-c', 'git clone <repo> ; done;']
+```
+
+- 외부 서비스 준비 대기 Init Container
+
+```yaml
+initContainers:
+- name: init-myservice
+  image: busybox:1.28
+  command: ['sh', '-c', 'until nslookup myservice; do echo waiting for myservice; sleep 2; done;']
+- name: init-mydb
+  image: busybox:1.28
+  command: ['sh', '-c', 'until nslookup mydb; do echo waiting for mydb; sleep 2; done;']
+```
+
+## Introduction to Autoscaling
