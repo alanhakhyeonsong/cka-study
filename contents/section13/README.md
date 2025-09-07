@@ -340,3 +340,455 @@ resources:
 -	수백 개의 리소스를 계층적이고 모듈화된 형태로 관리 가능
 - 루트 디렉터리에서 한 번의 명령으로 모든 리소스 배포
 - CI/CD 파이프라인도 단일 단계로 관리 가능
+
+## Patches Intro
+### Patch의 개념
+- Transformer: 전체 오브젝트에 전반적인 수정 적용 (예: 네임스페이스 추가).
+- Patch: 특정 오브젝트의 특정 속성만 선택적으로 변경 → “수술적인 접근 방식”.
+
+### patch의 주요 작업 유형
+- `add`: 속성/항목을 추가 (예: 컨테이너 추가).
+- `remove`: 속성/항목을 제거 (예: 레이블 삭제).
+- `replace`: 속성 값을 다른 값으로 교체 (예: replicas=1 → replicas=5).
+
+### 패치 정의 시 필요한 요소
+1. 작업 유형(op) – add, remove, replace
+2. 대상(target) – 어떤 리소스에 적용할지 지정
+  - kind, name, namespace, labelSelector, annotationSelector 등으로 일치 조건 설정
+3. 경로(path) – YAML 트리에서 속성이 위치한 경로 (예: `/metadata/name`, `/spec/replicas`)
+4. 값(value) – 교체하거나 추가할 값 (remove는 필요 없음)
+
+### JSON 6902 패치
+- 구성 요소: target + patch 세부정보
+- 경로 기반으로 속성을 지정해 수정
+- 예시
+  - `/metadata/name` → “api-deployment”를 “web-deployment”로 교체
+  - `/spec/replicas` → 1을 5로 교체
+- RFC 6902 표준 기반
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: api
+  template:
+    metadata:
+      labels:
+        component: api
+    spec:
+      containers:
+        - name: nginx
+          image: nginx
+```
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: api-deployment
+    patches: |-
+      - op: replace
+        path: /spec/replicas
+        value: 5
+```
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: api-deployment
+    patches: |-
+      - op: replace
+        path: /metadata/name
+        value: web-deployment
+```
+
+### 전략적 병합 패치(Strategic Merge Patch)
+- 일반 Kubernetes YAML과 거의 동일한 형태
+- 원본 YAML을 일부만 남겨 원하는 속성만 변경
+- 예시
+
+```yaml
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: api-deployment
+      spec:
+        replicas: 5
+```
+
+- 원래 값(1)이 새로운 값(5)로 병합됨
+- 장점: 익숙하고 가독성 높음
+
+### 비교 및 활용
+- JSON 6902: 세밀한 조작 가능, 표준화된 방식.
+- 전략적 병합 패치: 일반 YAML 기반, 직관적이고 가독성 좋음.
+- 두 가지 모두 혼합 사용 가능. 취향과 상황에 따라 선택.
+
+## Different Types of Patches
+### 패치 정의 방식
+- 인라인(In-line) 방식
+  - 지금까지 다룬 것처럼 kustomization.yaml 안에서 직접 패치를 정의.
+  - 간단한 경우에 적합.
+- 별도 파일(File) 방식
+  - kustomization.yaml에서는 대상 리소스와 패치 파일 경로만 지정.
+  - 실제 패치 내용은 별도의 YAML 파일에 작성.
+  - 패치가 많아져 복잡해질 때 유용.
+
+### 두 방식의 공통점
+- JSON 6902 패치와 전략적 병합 패치 모두 적용 가능.
+- 인라인 정의든 파일 분리든, 기능적으로 동일하게 동작.
+- 상황과 복잡도에 따라 선택하면 됨.
+
+## Patches Dictionary
+### JSON 6902 패치
+- 키 교체(Replace)
+  - op: replace
+  - path: /spec/template/metadata/labels/component
+  - value: web  
+    → 기존 component: api → component: web 으로 변경
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: api-deployment
+    patch: |-
+      - op: replace
+        path: /spec/template/metadata/labels/component
+        value: web
+```
+
+- 키 추가(Add)
+  - op: add
+  - path: /spec/template/metadata/labels/org
+  - value: kodekloud  
+    → component: api 레이블에 org: kodekloud 추가
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: api-deployment
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/labels/org
+        value: kodekloud
+```
+
+- 키 제거(Remove)
+  - op: remove
+  - path: /spec/template/metadata/labels/org  
+    → org: kodekloud 레이블 삭제
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: api-deployment
+    patch: |-
+      - op: remove
+        path: /spec/template/metadata/labels/org
+```
+
+### 전략적 병합 패치 (Strategic Merge Patch)
+- 교체: 원래 Deployment YAML 일부를 복사 → labels 아래 값만 component: web으로 변경.
+
+```yaml
+patchesStrategicMerge:
+  - label-replace.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment
+spec:
+  template:
+    metadata:
+      labels:
+        component: web
+```
+
+- 추가: 기존 labels에 org: kodekloud 추가.
+
+```yaml
+patchesStrategicMerge:
+  - label-add.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment
+spec:
+  template:
+    metadata:
+      labels:
+        org: kodekloud
+```
+
+- 삭제: 삭제할 키를 null 값으로 설정 → org: null → 적용 시 레이블이 제거됨.
+
+```yaml
+patchesStrategicMerge:
+  - label-remove.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment
+spec:
+  template:
+    metadata:
+      labels:
+        org: null
+```
+
+### 차이점 & 활용
+- JSON 6902 패치
+  - RFC 기반, op/path/value 구조.
+  - 세밀하고 선언적인 수정.
+- 전략적 병합 패치
+  - Kubernetes YAML과 유사해 직관적, 가독성 좋음.
+  - 키 제거 시 null로 지정해야 한다는 특징.
+
+## Patches List
+### 목록(List)에서의 교체
+- JSON 6902
+  - 배열의 인덱스를 사용해 특정 항목을 지정 (/spec/template/spec/containers/0/image)
+  - op: replace + value 로 변경
+  - 예: 첫 번째 컨테이너 nginx → haproxy 로 교체
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: web-deployment
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: haproxy
+      - op: replace
+        path: /spec/template/spec/containers/0/name
+        value: haproxy
+```
+
+- Strategic Merge Patch
+  - 컨테이너 name 을 기준으로 일치시킨 뒤 image 속성만 새 값으로 지정
+  - 예: nginx 컨테이너의 이미지를 haproxy 로 교체
+
+```yaml
+patchesStrategicMerge:
+  - container-replace.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: nginx   # 기존 컨테이너 이름 기준
+          image: haproxy
+          name: haproxy
+```
+
+### 목록에 항목 추가
+- JSON 6902
+  - op: add 사용
+  - path: /spec/template/spec/containers/- → - 는 목록 끝에 추가 의미
+  - 값(value)에는 새 컨테이너 정의 (haproxy)
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: web-deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/-
+        value:
+          name: haproxy
+          image: haproxy
+```
+
+- Strategic Merge Patch
+  - 컨테이너 배열 아래에 새 컨테이너 정의만 추가
+  - 병합 시 기존 항목과 합쳐져 최종적으로 2개 이상 컨테이너가 됨
+
+```yaml
+patchesStrategicMerge:
+  - container-add.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: haproxy
+          image: haproxy
+```
+
+### 목록에서 항목 삭제
+- JSON 6902
+  - op: remove
+  - path에 제거할 항목의 인덱스 지정 (/spec/template/spec/containers/1)
+  - 값은 필요 없음
+
+```yaml
+patches:
+  - target:
+      kind: Deployment
+      name: web-deployment
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/containers/1
+```
+
+- Strategic Merge Patch
+  - $patch: delete 지시문 사용
+  - 삭제하려는 컨테이너를 name 으로 지정 (name: database)
+  - 적용 시 해당 컨테이너가 제거됨
+
+```yaml
+patchesStrategicMerge:
+  - container-remove.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: database
+          $patch: delete
+```
+
+## Overlays
+### 오버레이(Overlay) 개념
+- Base: 모든 환경에서 공통으로 사용하는 기본 리소스 정의 저장소
+- Overlay: 개발(dev), 스테이징(staging), 프로덕션(prod) 등 환경별로 필요한 수정 사항을 정의
+- Base의 리소스를 불러와 환경에 맞는 패치를 적용하거나 새 리소스를 추가할 수 있음
+
+### 오버레이 동작 방식
+1. 폴더 구조
+
+```
+k8s/
+  base/
+    kustomization.yaml
+    nginx-depl.yaml
+  overlays/
+    dev/
+      kustomization.yaml
+    staging/
+      kustomization.yaml
+    prod/
+      kustomization.yaml
+```
+
+2. 각 Overlay의 kustomization.yaml에는
+- `bases` → base 디렉토리 참조
+- `patches` → 환경별 패치 정의
+- `resources` → 환경별 새 리소스 추가 가능
+
+### 패치 예시 (복제본 변경)
+- Base: replicas: 1
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21
+---
+resources:
+  - nginx-depl.yaml
+```
+
+- Dev Overlay: 패치로 replicas: 2
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 2
+---
+bases:
+  - ../../base
+
+patchesStrategicMerge:
+  - replicas-patch.yaml
+```
+
+- Prod Overlay: 패치로 replicas: 3
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:latest
+---
+bases:
+  - ../../base
+
+patchesStrategicMerge:
+  - replicas-patch.yaml
+
+resources:
+  - grafana-depl.yaml
+```
+
+### 추가 리소스 가능
+- Overlay에는 Base에 없는 새로운 리소스도 정의 가능
+- 예: Prod 환경에만 grafana-depl.yaml 추가
+
+### 유연한 디렉토리 구조
+- Base와 Overlay를 기능별/서비스별 하위 디렉터리로 나눌 수 있음
+- 디렉토리 구조는 강제되지 않으며, 필요한 방식으로 자유롭게 구성 가능
