@@ -341,6 +341,228 @@ resources:
 - 루트 디렉터리에서 한 번의 명령으로 모든 리소스 배포
 - CI/CD 파이프라인도 단일 단계로 관리 가능
 
+## Common Transformers
+### 문제 배경
+- 여러 Kubernetes 리소스(YAML)에 **공통 설정(레이블, 네임스페이스, 이름 규칙 등)**을 반복적으로 추가해야 하는 경우, 수작업은 비효율적이고 오류 발생 가능성이 큼.
+- Kustomize는 이런 반복 작업을 자동화할 수 있는 트랜스포머(Transformers) 기능 제공.
+
+### 주요 공통 변환 기능
+- `commonLabels`: 모든 리소스에 공통 레이블 추가.
+- `namePrefix` / `nameSuffix`: 모든 리소스 이름에 접두사·접미사 추가.
+- `namespace`: 모든 리소스를 특정 네임스페이스에 배치.
+- `commonAnnotations`: 모든 리소스에 공통 어노테이션(메타데이터) 추가.
+
+### 사용 방식
+- kustomization.yaml 파일에 해당 속성(`commonLabels`, `namespace`, `namePrefix`, `commonAnnotations`)을 정의.
+- 이 설정이 포함된 Kustomization에서 가져오는 모든 리소스에 자동 적용됨.
+
+### 공통 변환 적용 예시
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 포함할 리소스들 (Deployment, Service 등)
+resources:
+  - deployment.yaml
+  - service.yaml
+
+# 모든 리소스에 공통 레이블 추가
+commonLabels:
+  org: kodekloud
+  env: dev
+
+# 모든 리소스 이름에 접두사/접미사 추가
+namePrefix: demo-
+nameSuffix: -v1
+
+# 모든 리소스를 특정 네임스페이스 아래에 배치
+namespace: my-namespace
+
+# 모든 리소스에 공통 어노테이션 추가
+commonAnnotations:
+  maintainer: team@company.com
+  purpose: demo-environment
+```
+
+원본 리소스는 아래와 같음.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+        - name: webapp
+          image: nginx
+```
+
+변환된 리소스는 아래와 같음.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-webapp-v1   # 접두사+접미사 적용
+  namespace: my-namespace
+  labels:
+    app: webapp
+    org: kodekloud        # 공통 레이블 추가
+    env: dev
+  annotations:
+    maintainer: team@company.com
+    purpose: demo-environment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: webapp
+      org: kodekloud
+      env: dev
+  template:
+    metadata:
+      labels:
+        app: webapp
+        org: kodekloud
+        env: dev
+      annotations:
+        maintainer: team@company.com
+        purpose: demo-environment
+    spec:
+      containers:
+        - name: webapp
+          image: nginx
+```
+
+## Image Transformers
+### 문제 상황
+- Deployment 등의 매니페스트에서 컨테이너 이미지 이름이나 태그를 일일이 수정하려면 많은 리소스를 직접 편집해야 해서 비효율적임.
+
+### 해결 방법: 이미지 트랜스포머
+- kustomization.yaml에서 `images` 속성을 사용해 이미지 이름이나 태그를 일괄 변환 가능.
+- `name` 속성: 교체할 이미지 이름 지정 (컨테이너 이름과 헷갈리지 말 것).
+- `newName`: 새 이미지 이름으로 교체.
+- `newTag`: 기존 이미지 태그를 새로운 태그로 교체.
+- `newName`과 `newTag`를 동시에 지정하면 `이미지:태그` 형식으로 최종 변경됨.
+
+### 예시
+1. `nginx` → `haproxy`로 이미지 교체
+2. `nginx` → `nginx:2` (태그만 변경)
+3. `nginx` → `haproxy:2` (이미지와 태그 모두 변경)
+
+```yaml
+# 1. 이미지 이름만 변경
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+
+images:
+  - name: nginx          # 기존 이미지 이름
+    newName: haproxy     # 교체할 이미지 이름
+---
+# 2. 태그만 변경
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+
+images:
+  - name: nginx
+    newTag: "2"
+---
+# 3. 이름과 태그 동시 변경
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+
+images:
+  - name: nginx
+    newName: haproxy
+    newTag: "2"
+```
+
+## Patches Intro
+Kustomize에서 패치(Patch) 는 특정 리소스의 일부 속성을 수술적으로 수정하는 방법이다.
+- 공통 트랜스포머: 모든 오브젝트에 일괄 적용 (예: 공통 레이블, 네임스페이스 추가)
+- 패치: 특정 오브젝트의 특정 속성만 변경 (예: Deployment 복제본 수 변경)
+
+### 패치 작업 유형 (Operations)
+- add: 새로운 속성/객체 추가 (예: 컨테이너 목록에 새 컨테이너 추가)
+- remove: 기존 속성/객체 제거 (예: 레이블 삭제, 컨테이너 삭제)
+- replace: 기존 값을 새 값으로 교체 (예: replicas: 5 → 10)
+
+### 패치 대상 지정 (Target)
+- 대상 리소스를 지정하는 조건들
+  - kind (리소스 종류)
+  - name (리소스 이름)
+  - namespace
+  - labelSelector / annotationSelector
+- 여러 조건을 조합해 원하는 리소스만 선택 가능
+
+### 패치 방법 2가지
+1. JSON 6902 패치
+- op(작업), path(대상 속성 경로), value(새 값) 지정
+- 예: /metadata/name 경로의 값을 "api-deployment" → "web-deployment" 으로 교체
+
+```yaml
+resources:
+  - deployment.yaml
+
+patches:
+  - target:
+      kind: Deployment
+      name: api-deployment
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: web-deployment
+      - op: replace
+        path: /spec/replicas
+        value: 5
+```
+
+2. 전략적 병합 패치 (Strategic Merge Patch)
+- 원래 Kubernetes 리소스 YAML을 일부만 남기고 수정
+- 일반 YAML 구성처럼 보이며 가독성이 좋음
+- 예: Deployment의 spec.replicas: 1 → 5
+
+```yaml
+# kustomization.yaml
+resources:
+  - deployment.yaml
+
+patchesStrategicMerge:
+  - patch-deployment.yaml
+
+---
+# patch-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment   # 타겟이 되는 기존 오브젝트 이름
+spec:
+  replicas: 5            # 기존 1 → 5로 변경
+```
+
+### 특징
+- 두 방식 모두 사용 가능, 혼합도 가능
+- JSON 6902: 더 명확한 “경로 기반” 제어
+- 전략적 병합 패치: 기존 YAML과 유사해 가독성 ↑
+
 ## Patches Intro
 ### Patch의 개념
 - Transformer: 전체 오브젝트에 전반적인 수정 적용 (예: 네임스페이스 추가).
